@@ -10,7 +10,7 @@ from osgeo import gdal
 
 @click.command()
 @click.option(
-    "--linear",
+    "--fit",
     default=None,
     type=int,
     help="Scale linearly from 0 to specified maximum value",
@@ -54,26 +54,6 @@ def main(input_path, output_path, xy_steps, z_scale, nodata, out_nodata):
     outband.SetNoDataValue(out_nodata)
     outband.WriteArray(arr)
     outband.FlushCache()
-
-
-def downsample_array(arr, max_dimension):
-    """
-    Takes an array and downsamples it so its longest dimension is less than
-    or equal to max_dimension.
-    """
-    # Work out the downsampling factors for that array
-    width, height = arr.shape
-    current_steps = max(width, height)
-    downsample_factor = 1
-    while (current_steps // downsample_factor) > max_dimension:
-        downsample_factor += 1
-    click.echo(
-        "Array size {} x {} - downsample factor {}".format(
-            width, height, downsample_factor
-        )
-    )
-    # Downsample the array
-    return arr[::downsample_factor, ::downsample_factor]
 
 
 def value_range(arr, nodata):

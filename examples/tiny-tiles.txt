@@ -1,0 +1,7 @@
+# Example pipeline to make small terrain models
+
+# Decimate input so that it's more reasonable
+decifit --xy-scale=1000
+
+# Linearly fit-scale to a max height of 4
+zscale --fit=4
