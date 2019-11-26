@@ -9,8 +9,8 @@ from landcarve.utils.io import array_to_raster, raster_to_array
 @main.command()
 @click.option(
     "--fit",
-    default=1,
-    type=int,
+    default=1.0,
+    type=float,
     help="Scale linearly from 0 to specified maximum value",
 )
 @click.argument("input_path")
@@ -34,7 +34,7 @@ def zfit(input_path, output_path, fit):
         if x > NODATA
         else NODATA
     )
-    arr = numpy.vectorize(scaler)(arr)
+    arr = numpy.vectorize(scaler, otypes="f")(arr)
     click.echo("Array scaled to range {} to {}".format(0, fit), err=True)
     # Write out the array
     array_to_raster(arr, output_path)

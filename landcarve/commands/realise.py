@@ -3,6 +3,7 @@ import collections
 import click
 import numpy
 import struct
+import time
 
 from landcarve.cli import main
 from landcarve.constants import NODATA
@@ -12,43 +13,47 @@ from landcarve.utils.io import raster_to_array
 @main.command()
 @click.argument("input_path", default="-")
 @click.argument("output_path")
-@click.option("--xy-scale", default=1, help="X/Y scale to use")
-@click.option("--z-scale", default=1, help="Z scale to use")
-@click.option("--minimum", default=0, help="Minimum depth (zero point)")
-@click.option("--thickness", default=1, help="Base thickness")
-@click.option("--simplify/--nosimplify", default=True, help="Apply simplification to final model")
+@click.option("--xy-scale", default=1.0, help="X/Y scale to use")
+@click.option("--z-scale", default=1.0, help="Z scale to use")
+@click.option("--minimum", default=0.0, help="Minimum depth (zero point)")
+@click.option("--base", default=1.0, help="Base thickness")
+@click.option("--simplify/--no-simplify", default=True, help="Apply simplification to final model")
+@click.option("--solid/--not-solid", default=False, help="Force a solid, square base")
 @click.pass_context
-def realise(ctx, input_path, output_path, xy_scale, z_scale, minimum, thickness, simplify):
+def realise(ctx, input_path, output_path, xy_scale, z_scale, minimum, base, simplify, solid):
     """
     Turns a DEM array into a 3D model.
     """
     # Load the file using GDAL
     arr = raster_to_array(input_path)
     # Open the target STL file
-    mesh = Mesh()
+    mesh = Mesh(scale=(xy_scale, xy_scale, z_scale))
+    # Apply the minimum constraint
+    if solid:
+        arr = numpy.vectorize(lambda x: max(0, x - minimum) if x > NODATA else 0, otypes=[object])(arr)
+    else:
+        arr = numpy.vectorize(lambda x: max(0, x - minimum) if x > NODATA else None, otypes=[object])(arr)
     # For each value in the array, output appropriate polygons
-    bottom = 0 - (thickness / z_scale)
+    bottom = 0 - (base / z_scale)
     with click.progressbar(length=arr.shape[0], label="Calculating mesh") as bar:
         for index, value in numpy.ndenumerate(arr):
             if index[1] == 0:
                 bar.update(1)
-            if NODATA < value < minimum:
-                value = minimum
-            if value > NODATA:
+            if value is not None:
                 # Work out the neighbour values
                 # Arranged like so:
                 #       t   tr
                 #   l   c---r
                 #       b
                 c = (index[0], index[1], value)
-                t = get_neighbour_value((index[0], index[1] - 1), arr, NODATA)
-                tr = get_neighbour_value((index[0] + 1, index[1] - 1), arr, NODATA)
-                tl = get_neighbour_value((index[0] - 1, index[1] - 1), arr, NODATA)
-                l = get_neighbour_value((index[0] - 1, index[1]), arr, NODATA)
-                r = get_neighbour_value((index[0] + 1, index[1]), arr, NODATA)
-                bl = get_neighbour_value((index[0] - 1, index[1] + 1), arr, NODATA)
-                b = get_neighbour_value((index[0], index[1] + 1), arr, NODATA)
-                br = get_neighbour_value((index[0] + 1, index[1] + 1), arr, NODATA)
+                t = get_neighbour_value((index[0], index[1] - 1), arr)
+                tr = get_neighbour_value((index[0] + 1, index[1] - 1), arr)
+                tl = get_neighbour_value((index[0] - 1, index[1] - 1), arr)
+                l = get_neighbour_value((index[0] - 1, index[1]), arr)
+                r = get_neighbour_value((index[0] + 1, index[1]), arr)
+                bl = get_neighbour_value((index[0] - 1, index[1] + 1), arr)
+                b = get_neighbour_value((index[0], index[1] + 1), arr)
+                br = get_neighbour_value((index[0] + 1, index[1] + 1), arr)
                 # Centre-Right-Bottom triangle
                 if r[2] is not None and b[2] is not None:
                     mesh.add_surface(c, r, b, bottom)
@@ -111,7 +116,7 @@ def realise(ctx, input_path, output_path, xy_scale, z_scale, minimum, thickness,
     mesh.save(output_path)
 
 
-def get_neighbour_value(index, arr, NODATA):
+def get_neighbour_value(index, arr):
     """
     Gets a neighbour value. Puts None in place for NODATA or edge of array.
     """
@@ -124,10 +129,7 @@ def get_neighbour_value(index, arr, NODATA):
         return (index[0], index[1], None)
     else:
         value = arr[index]
-        if value <= NODATA:
-            return (index[0], index[1], None)
-        else:
-            return (index[0], index[1], value)
+        return (index[0], index[1], value)
 
 
 class Mesh:
@@ -135,7 +137,8 @@ class Mesh:
     Represents a mesh of the geography.
     """
 
-    def __init__(self):
+    def __init__(self, scale):
+        self.scale = scale or (1, 1, 1)
         # Dict of (x, y, z): index
         self.vertices = collections.OrderedDict()
         # List of (v1, v2, v3, normal)
@@ -146,6 +149,7 @@ class Mesh:
         Returns the vertex's index, adding it if needed
         """
         assert len(vertex) == 3
+        vertex = (vertex[0] * self.scale[0], vertex[1] * self.scale[1], vertex[2] * self.scale[2])
         if vertex not in self.vertices:
             self.vertices[vertex] = len(self.vertices)
         return self.vertices[vertex]
@@ -221,43 +225,45 @@ class Mesh:
         """
         # Create a map of vertex indexes to the normals of the faces attached to them,
         # and vertices to their neighbours
+        non_flat_vertices = set()
         vertex_face_normals = {}
-        vertex_neighbours = {}
+        vertex_neighbours = {v: [] for v in self.vertices.values()}
         for normal, v1, v2, v3 in self.faces:
-            vertex_face_normals.setdefault(v1, []).append(normal)
-            vertex_face_normals.setdefault(v2, []).append(normal)
-            vertex_face_normals.setdefault(v3, []).append(normal)
-            vertex_neighbours.setdefault(v1, []).extend([v2, v3])
-            vertex_neighbours.setdefault(v2, []).extend([v1, v3])
-            vertex_neighbours.setdefault(v3, []).extend([v1, v2])
-        # Remove all vertices that don't have the same normal for all faces
-        # Yes, this is not optimal, but I just want to take out a big chunk of flat surfaces
-        flat_vertices = {
-            vertex: normals[0] for vertex, normals in vertex_face_normals.items()
-            if all(x == normals[0] for x in normals)
-        }
+            # Work out if it has flat normals
+            for v in (v1, v2, v3):
+                if v not in non_flat_vertices:
+                    if v in vertex_face_normals:
+                        if vertex_face_normals[v] != normal:
+                            non_flat_vertices.add(v)
+                            del vertex_face_normals[v]
+                    else:
+                        vertex_face_normals[v] = normal
+            # Add it to the neighbour graph
+            vertex_neighbours[v1].extend([v2, v3])
+            vertex_neighbours[v2].extend([v1, v3])
+            vertex_neighbours[v3].extend([v1, v2])
         # Go through edges, and remove those whose normals match.
         # Keep track of tainted vertices that we can't touch this iteration.
         tainted_vertices = set()
         merged_vertices = {}
         for index, vertex in enumerate(self.vertices):
             # Skip non-flat vertices
-            if index not in flat_vertices:
+            if index not in vertex_face_normals:
                 continue
             # Skip vertices whose neighbours were already touched
             if index in tainted_vertices:
                 continue
             # Skip vertices which have non-flat neighbours
-            if not all(neighbour in flat_vertices for neighbour in vertex_neighbours[index]):
+            if not all(neighbour in vertex_face_normals for neighbour in vertex_neighbours[index]):
                 continue
             # See if there's a neighbour we can merge with
             for neighbour in vertex_neighbours[index]:
-                if neighbour in flat_vertices and flat_vertices[neighbour] == flat_vertices[index]:
+                if neighbour in vertex_face_normals and vertex_face_normals[neighbour] == vertex_face_normals[index]:
                     # Mark them for merge
                     merged_vertices[index] = neighbour
-                    # Mark all other neighbours of both as tainted
-                    tainted_vertices.update(vertex_neighbours[index])
-                    tainted_vertices.update(vertex_neighbours[neighbour])
+                    # Mark them as tainted so we don't revisit them
+                    tainted_vertices.add(index)
+                    tainted_vertices.add(neighbour)
                     break
         # Rewrite mesh with the new vertices and faces
         new_vertices = collections.OrderedDict()

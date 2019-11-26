@@ -1,5 +1,7 @@
 *.stl
 *.tif
+*.tiff
+*.asc
 *.egg-info
 /build
 /dist

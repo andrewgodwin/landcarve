@@ -9,8 +9,8 @@ from landcarve.utils.io import array_to_raster, raster_to_array
 @main.command()
 @click.option(
     "--nodata",
-    default=0,
-    type=int,
+    default=0.0,
+    type=float,
     help="NODATA boundary for input",
 )
 @click.argument("input_path")
@@ -28,7 +28,7 @@ def fixnodata(ctx, input_path, output_path, nodata):
         if x > nodata
         else NODATA
     )
-    arr = numpy.vectorize(scaler)(arr)
+    arr = numpy.vectorize(scaler, otypes="f")(arr)
     click.echo("NODATA values set to {}".format(NODATA), err=True)
     # Write out the array
     array_to_raster(arr, output_path)

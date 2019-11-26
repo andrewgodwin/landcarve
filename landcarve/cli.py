@@ -14,6 +14,7 @@ import landcarve.commands.decifit
 import landcarve.commands.fixnodata
 import landcarve.commands.pipeline
 import landcarve.commands.realise
+import landcarve.commands.smooth
 import landcarve.commands.zfit
 
 
