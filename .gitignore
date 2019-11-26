@@ -1,2 +1,5 @@
 *.stl
 *.tif
+*.egg-info
+/build
+/dist

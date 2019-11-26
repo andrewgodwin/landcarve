@@ -1,7 +1,13 @@
 # Example pipeline to make small terrain models
 
 # Decimate input so that it's more reasonable
-decifit --xy-scale=1000
+decifit --xy-steps=100
 
-# Linearly fit-scale to a max height of 4
-zscale --fit=4
+# Fix NODATA values
+fixnodata --nodata=0
+
+# Linearly fit-scale height
+zfit --fit=50
+
+# Render to an STL
+realise

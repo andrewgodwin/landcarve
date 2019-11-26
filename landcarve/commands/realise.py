@@ -1,39 +1,37 @@
-#!/usr/bin/env python3
-"""
-Makes 3D models from rasters
-"""
-
 import click
 import numpy
 import struct
-from osgeo import gdal
+
+from landcarve.cli import main
+from landcarve.constants import NODATA
+from landcarve.utils.io import raster_to_array
 
 
-@click.command()
-@click.option("--xy-scale", default=0.1, help="X/Y scale to use")
-@click.option("--z-scale", default=1.0, help="Z scale to use")
-@click.option("--thickness", default=1.0, help="Base thickness, in data Z scale")
-@click.option("--nodata", default=-1000, help="NODATA value.")
-@click.argument("input_path")
+@main.command()
+@click.argument("input_path", default="-")
 @click.argument("output_path")
-def main(input_path, output_path, xy_scale, z_scale, thickness, nodata):
+@click.option("--xy-scale", default=1, help="X/Y scale to use")
+@click.option("--z-scale", default=1, help="Z scale to use")
+@click.option("--minimum", default=0, help="Minimum depth (zero point)")
+@click.option("--thickness", default=1, help="Base thickness")
+@click.pass_context
+def realise(ctx, input_path, output_path, xy_scale, z_scale, minimum, thickness):
     """
-    Main command entry point.
+    Turns a DEM array into a 3D model.
     """
     # Load the file using GDAL
-    raster = gdal.Open(input_path)
-    # Extract band 1 into an array
-    band = raster.GetRasterBand(1)
-    arr = band.ReadAsArray()
+    arr = raster_to_array(input_path)
     # Open the target STL file
     stl = STLWriter(output_path, xy_scale=xy_scale, z_scale=z_scale)
     # For each value in the array, output appropriate polygons
-    bottom = 0 - thickness
+    bottom = 0 - (thickness / z_scale)
     with click.progressbar(length=arr.shape[0], label="Writing STL") as bar:
         for index, value in numpy.ndenumerate(arr):
             if index[1] == 0:
                 bar.update(1)
-            if value > nodata:
+            if NODATA < value < minimum:
+                value = minimum
+            if value > NODATA:
                 # Work out the neighbour values
                 # Arranged like so:
                 #       t   tr
@@ -41,25 +39,25 @@ def main(input_path, output_path, xy_scale, z_scale, thickness, nodata):
                 #   bl  b---br  br2
                 #       b2  b2r
                 c = (index[0], index[1], value)
-                t = get_neighbour_value((index[0], index[1] - 1), arr, nodata)
-                tr = get_neighbour_value((index[0] + 1, index[1] - 1), arr, nodata)
-                l = get_neighbour_value((index[0] - 1, index[1]), arr, nodata)
-                r = get_neighbour_value((index[0] + 1, index[1]), arr, nodata)
-                r2 = get_neighbour_value((index[0] + 2, index[1]), arr, nodata)
-                bl = get_neighbour_value((index[0] - 1, index[1] + 1), arr, nodata)
-                b = get_neighbour_value((index[0], index[1] + 1), arr, nodata)
-                br = get_neighbour_value((index[0] + 1, index[1] + 1), arr, nodata)
-                br2 = get_neighbour_value((index[0] + 2, index[1] + 1), arr, nodata)
-                b2 = get_neighbour_value((index[0], index[1] + 2), arr, nodata)
-                b2r = get_neighbour_value((index[0] + 1, index[1] + 2), arr, nodata)
+                t = get_neighbour_value((index[0], index[1] - 1), arr, NODATA)
+                tr = get_neighbour_value((index[0] + 1, index[1] - 1), arr, NODATA)
+                l = get_neighbour_value((index[0] - 1, index[1]), arr, NODATA)
+                r = get_neighbour_value((index[0] + 1, index[1]), arr, NODATA)
+                r2 = get_neighbour_value((index[0] + 2, index[1]), arr, NODATA)
+                bl = get_neighbour_value((index[0] - 1, index[1] + 1), arr, NODATA)
+                b = get_neighbour_value((index[0], index[1] + 1), arr, NODATA)
+                br = get_neighbour_value((index[0] + 1, index[1] + 1), arr, NODATA)
+                br2 = get_neighbour_value((index[0] + 2, index[1] + 1), arr, NODATA)
+                b2 = get_neighbour_value((index[0], index[1] + 2), arr, NODATA)
+                b2r = get_neighbour_value((index[0] + 1, index[1] + 2), arr, NODATA)
                 # Centre-Right-Bottom triangle
                 if r[2] is not None and b[2] is not None and br[2] is not None:
                     stl.add_facet(c[0], c[1], c[2], r[0], r[1], r[2], b[0], b[1], b[2])
                     stl.add_facet(
                         c[0], c[1], bottom, b[0], b[1], bottom, r[0], r[1], bottom
                     )
-                    # Right-bottomright-bottom triangle
-                    # if br is not None:
+                    # Right-bottom-bottomright triangle
+                    #if br is not None:
                     stl.add_facet(
                         r[0], r[1], r[2], br[0], br[1], br[2], b[0], b[1], b[2]
                     )
@@ -110,9 +108,9 @@ def main(input_path, output_path, xy_scale, z_scale, thickness, nodata):
     stl.close()
 
 
-def get_neighbour_value(index, arr, nodata):
+def get_neighbour_value(index, arr, NODATA):
     """
-    Gets a neighbour value. Puts None in place for nodata or edge of array.
+    Gets a neighbour value. Puts None in place for NODATA or edge of array.
     """
     if (
         index[0] < 0
@@ -123,7 +121,7 @@ def get_neighbour_value(index, arr, nodata):
         return (index[0], index[1], None)
     else:
         value = arr[index]
-        if value <= nodata:
+        if value <= NODATA:
             return (index[0], index[1], None)
         else:
             return (index[0], index[1], value)
@@ -199,7 +197,3 @@ class STLWriter:
             )
         )
         self.num_facets += 1
-
-
-if __name__ == "__main__":
-    main()

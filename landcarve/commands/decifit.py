@@ -1,10 +1,10 @@
 import click
 
-from gistools.cli import main
-from gistools.utils.io import array_to_raster, raster_to_array
+from landcarve.cli import main
+from landcarve.utils.io import array_to_raster, raster_to_array
 
 
-@click.command()
+@main.command()
 @click.option(
     "-x",
     "--xy-steps",
@@ -23,13 +23,9 @@ def decifit(input_path, output_path, xy_steps):
     arr = raster_to_array(input_path)
     # Downsample it
     arr = downsample_array(arr, xy_steps)
-    click.echo("Downsampled to {} x {}".format(arr.shape[0], arr.shape[1]))
+    click.echo("Downsampled to {} x {}".format(arr.shape[0], arr.shape[1]), err=True)
     # Write out the array
     array_to_raster(arr, output_path)
-
-
-main.add_command(decifit)
-print(id(main))
 
 
 def downsample_array(arr, max_dimension):
@@ -43,11 +39,6 @@ def downsample_array(arr, max_dimension):
     downsample_factor = 1
     while (current_steps // downsample_factor) > max_dimension:
         downsample_factor += 1
-    click.echo(
-        "Array size {} x {} - downsample factor {}".format(
-            width, height, downsample_factor
-        )
-    )
     # Downsample the array
     return arr[::downsample_factor, ::downsample_factor]
 
