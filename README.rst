@@ -1,8 +1,8 @@
-GIS Tools
+Landcarve
 =========
 
 A collection of tools for making 3D models and similar things out of GIS data.
-Chain them together to achieve different results.
+Designed to be run as a pipeline, though the individual tools can be run too.
 
 
 decifit
