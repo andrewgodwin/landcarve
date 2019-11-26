@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import click
@@ -34,7 +35,11 @@ def pipeline(input_path, output_path, pipeline_file):
             # Run the command
             command = "landcarve %s %s %s" % (line, current_path, next_path)
             click.echo(click.style("Running: %s" % line, fg="green", bold=True))
-            subprocess.check_call(command, shell=True)
+            try:
+                subprocess.check_call(command, shell=True)
+            except subprocess.CalledProcessError:
+                click.echo(click.style("Subcommand failed", fg="red", bold=True))
+                sys.exit(1)
             # Delete any old temporary file
             if input_is_temporary:
                 os.unlink(current_path)

@@ -15,8 +15,7 @@ from landcarve.utils.io import array_to_raster, raster_to_array
 )
 @click.argument("input_path")
 @click.argument("output_path")
-@click.pass_context
-def zfit(ctx, input_path, output_path, fit):
+def zfit(input_path, output_path, fit):
     """
     Scales raster layers down to a certain number of cells in X/Y, maintaining
     aspect ratio.

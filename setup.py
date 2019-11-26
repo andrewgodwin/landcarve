@@ -18,7 +18,7 @@ setup(
     zip_safe=False,
     packages=find_packages(),
     include_package_data=True,
-    install_requires=["gdal~=2.0", "numpy", "click"],
+    install_requires=["gdal~=2.0", "numpy", "click", "pymesh2"],
     entry_points={
         "console_scripts": ["landcarve = landcarve.cli:main"]
     },
