@@ -18,11 +18,25 @@ examples in the ``examples/`` directory). The commands should not have the
     # Render to an STL
     realise --xy-scale=0.01 --z-scale=0.01 --base=0.2 --solid
 
-Then, run the pipeline with an input and output path, like so:
+Then, run the pipeline with an input and output path, like so::
 
     landcarve pipeline national-parks.txt input.geotiff output.stl
 
-You can read more about the individual commands below.
+You can read more about the individual commands below. If you want to get going
+directly with an example, download the .asc file linked from the
+``examples/london-tiles.txt`` pipeline, and run::
+
+    landcarve pipeline examples/london-tiles.txt tq3780_DSM_1m.asc output.stl
+
+
+Installation
+------------
+
+This isn't on PyPI yet, so clone the repository and run ``pip install -e .``.
+
+Installing GDAL can be a particular pain; if your OS offers it, I highly
+recommend installing a Python 3 GDAL package from there. On Ubuntu/Debian, this
+is ``python3-gdal``.
 
 
 Tips
