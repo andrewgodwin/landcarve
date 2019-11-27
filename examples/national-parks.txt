@@ -1,4 +1,5 @@
-# Example pipeline to make small terrain models
+# Example pipeline to make small terrain models of National Parks.
+# Designed for pre-cut-out heightmaps (around the park boundary) exported from QGIS.
 
 # Decimate input so that it's more reasonable
 decifit --xy-steps=50

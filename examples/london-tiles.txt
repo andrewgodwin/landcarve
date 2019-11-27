@@ -1,4 +1,5 @@
-# Example pipeline to make small terrain models
+# Example pipeline to make London tiles from Environment Agency data
+# Find an example .asc file to run through this here: https://drive.google.com/open?id=1MrEqwUxykgZLV0ux3oBdjTPuMRFWJ6Kn
 
 # Decimate input so that it's more reasonable
 decifit --xy-steps=500
