@@ -1,5 +1,6 @@
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -33,10 +34,10 @@ def pipeline(input_path, output_path, pipeline_file):
             next_path = os.path.join(tmpdir, "output-%i.tmp" % temporary_file_counter)
             temporary_file_counter += 1
             # Run the command
-            command = "landcarve %s %s %s" % (line, current_path, next_path)
+            command = ["landcarve", *shlex.split(line), current_path, next_path]
             click.echo(click.style("Running: %s" % line, fg="green", bold=True))
             try:
-                subprocess.check_call(command, shell=True)
+                subprocess.check_call(command)
             except subprocess.CalledProcessError:
                 click.echo(click.style("Subcommand failed", fg="red", bold=True))
                 sys.exit(1)
@@ -47,4 +48,3 @@ def pipeline(input_path, output_path, pipeline_file):
             input_is_temporary = True
         # Save final file
         shutil.move(current_path, output_path)
-
