@@ -2,7 +2,7 @@
 # Designed for pre-cut-out heightmaps (around the park boundary) exported from QGIS.
 
 # Decimate input so that it's more reasonable
-decifit --xy-steps=50
+decifit --xy-steps=500
 
 # Fix NODATA values
 fixnodata --nodata=0
@@ -11,4 +11,4 @@ fixnodata --nodata=0
 zfit --fit=3
 
 # Render to an STL
-realise --xy-scale=1
+realise --xy-scale=0.04 --base=0.1

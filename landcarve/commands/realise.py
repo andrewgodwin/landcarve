@@ -17,10 +17,14 @@ from landcarve.utils.io import raster_to_array
 @click.option("--z-scale", default=1.0, help="Z scale to use")
 @click.option("--minimum", default=0.0, help="Minimum depth (zero point)")
 @click.option("--base", default=1.0, help="Base thickness")
-@click.option("--simplify/--no-simplify", default=True, help="Apply simplification to final model")
+@click.option(
+    "--simplify/--no-simplify", default=True, help="Apply simplification to final model"
+)
 @click.option("--solid/--not-solid", default=False, help="Force a solid, square base")
 @click.pass_context
-def realise(ctx, input_path, output_path, xy_scale, z_scale, minimum, base, simplify, solid):
+def realise(
+    ctx, input_path, output_path, xy_scale, z_scale, minimum, base, simplify, solid
+):
     """
     Turns a DEM array into a 3D model.
     """
@@ -30,9 +34,13 @@ def realise(ctx, input_path, output_path, xy_scale, z_scale, minimum, base, simp
     mesh = Mesh(scale=(xy_scale, xy_scale, z_scale))
     # Apply the minimum constraint
     if solid:
-        arr = numpy.vectorize(lambda x: max(0, x - minimum) if x > NODATA else 0, otypes=[object])(arr)
+        arr = numpy.vectorize(
+            lambda x: max(0, x - minimum) if x > NODATA else 0, otypes=[object]
+        )(arr)
     else:
-        arr = numpy.vectorize(lambda x: max(0, x - minimum) if x > NODATA else None, otypes=[object])(arr)
+        arr = numpy.vectorize(
+            lambda x: max(0, x - minimum) if x > NODATA else None, otypes=[object]
+        )(arr)
     # For each value in the array, output appropriate polygons
     bottom = 0 - (base / z_scale)
     with click.progressbar(length=arr.shape[0], label="Calculating mesh") as bar:
@@ -149,7 +157,11 @@ class Mesh:
         Returns the vertex's index, adding it if needed
         """
         assert len(vertex) == 3
-        vertex = (vertex[0] * self.scale[0], vertex[1] * self.scale[1], vertex[2] * self.scale[2])
+        vertex = (
+            vertex[0] * self.scale[0],
+            vertex[1] * self.scale[1],
+            vertex[2] * self.scale[2],
+        )
         if vertex not in self.vertices:
             self.vertices[vertex] = len(self.vertices)
         return self.vertices[vertex]
@@ -254,11 +266,17 @@ class Mesh:
             if index in tainted_vertices:
                 continue
             # Skip vertices which have non-flat neighbours
-            if not all(neighbour in vertex_face_normals for neighbour in vertex_neighbours[index]):
+            if not all(
+                neighbour in vertex_face_normals
+                for neighbour in vertex_neighbours[index]
+            ):
                 continue
             # See if there's a neighbour we can merge with
             for neighbour in vertex_neighbours[index]:
-                if neighbour in vertex_face_normals and vertex_face_normals[neighbour] == vertex_face_normals[index]:
+                if (
+                    neighbour in vertex_face_normals
+                    and vertex_face_normals[neighbour] == vertex_face_normals[index]
+                ):
                     # Mark them for merge
                     merged_vertices[index] = neighbour
                     # Mark them as tainted so we don't revisit them
@@ -310,10 +328,18 @@ class Mesh:
                 fh.write(
                     struct.pack(
                         b"<ffffffffffffH",
-                        normal[0], normal[1], normal[2],
-                        vertex1[0], vertex1[1], vertex1[2],
-                        vertex2[0], vertex2[1], vertex2[2],
-                        vertex3[0], vertex3[1], vertex3[2],
+                        normal[0],
+                        normal[1],
+                        normal[2],
+                        vertex1[0],
+                        vertex1[1],
+                        vertex1[2],
+                        vertex2[0],
+                        vertex2[1],
+                        vertex2[2],
+                        vertex3[0],
+                        vertex3[1],
+                        vertex3[2],
                         0,
                     )
                 )

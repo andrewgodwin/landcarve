@@ -41,4 +41,3 @@ def downsample_array(arr, max_dimension):
         downsample_factor += 1
     # Downsample the array
     return arr[::downsample_factor, ::downsample_factor]
-

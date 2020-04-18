@@ -25,15 +25,9 @@ def zfit(input_path, output_path, fit):
     # Work out what the range of Z values is, ignoring NODATA
     min_value, max_value = value_range(arr, NODATA)
     value_delta = max_value - min_value
-    click.echo(
-        "Value range: {} to {} ({})".format(min_value, max_value, value_delta)
-    )
+    click.echo("Value range: {} to {} ({})".format(min_value, max_value, value_delta))
     # Scale the array to be more normalised
-    scaler = (
-        lambda x: (((x - min_value) / value_delta) * fit)
-        if x > NODATA
-        else NODATA
-    )
+    scaler = lambda x: (((x - min_value) / value_delta) * fit) if x > NODATA else NODATA
     arr = numpy.vectorize(scaler, otypes="f")(arr)
     click.echo("Array scaled to range {} to {}".format(0, fit), err=True)
     # Write out the array
