@@ -22,20 +22,29 @@ def pipeline(input_path, output_path, pipeline_file):
     temporary_file_counter = 1
     input_is_temporary = False
     current_path = input_path
-    # Load the pipeline file and run through each command
+    # Load the pipeline file into memory
     click.echo("Pipeline: %s" % pipeline_file, err=True)
+    pipeline = []
+    for line in open(pipeline_file):
+        # Skip blank lines and comments
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        pipeline.append(line)
+    # Run through the pipeline
     with tempfile.TemporaryDirectory(prefix="landcarve-") as tmpdir:
-        for line in open(pipeline_file):
-            # Skip blank lines and comments
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
+        for i, line in enumerate(pipeline):
             # Work out input/output filenames
-            next_path = os.path.join(tmpdir, "output-%i.tmp" % temporary_file_counter)
-            temporary_file_counter += 1
+            if i == len(pipeline) - 1:
+                next_path = output_path
+            else:
+                next_path = os.path.join(
+                    tmpdir, "output-%i.tmp" % temporary_file_counter
+                )
+                temporary_file_counter += 1
             # Run the command
             command = ["landcarve", *shlex.split(line), current_path, next_path]
-            click.echo(click.style("Running: %s" % line, fg="green", bold=True))
+            click.echo(click.style("Running: %s" % command, fg="green", bold=True))
             try:
                 subprocess.check_call(command)
             except subprocess.CalledProcessError:
@@ -46,5 +55,3 @@ def pipeline(input_path, output_path, pipeline_file):
                 os.unlink(current_path)
             current_path = next_path
             input_is_temporary = True
-        # Save final file
-        shutil.move(current_path, output_path)

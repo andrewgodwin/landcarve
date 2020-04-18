@@ -10,6 +10,7 @@ def main():
 
 
 # Import all sub-commands
+import landcarve.commands.contour_image
 import landcarve.commands.decifit
 import landcarve.commands.fixnodata
 import landcarve.commands.pipeline
