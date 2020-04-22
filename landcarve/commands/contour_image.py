@@ -10,7 +10,7 @@ import svgwrite
 from landcarve.cli import main
 from landcarve.constants import NODATA
 from landcarve.utils.io import array_to_raster, raster_to_array
-from landcarve.utils.graphics import bitmap_array_to_image, draw_border
+from landcarve.utils.graphics import bitmap_array_to_image, draw_border, draw_stripes
 
 
 @main.command()
@@ -113,7 +113,7 @@ def make_cuts(arr, lower, upper, output_path, min_object, min_hole, simp):
             [(x, y) for (y, x) in contour], simp
         )
         drawing.add(
-            drawing.polyline(points=simplified_contour, stroke="blue", fill="none")
+            drawing.polyline(points=simplified_contour, stroke="black", fill="none")
         )
     # Border
     drawing.add(
@@ -171,6 +171,12 @@ def make_image(arr, terrains, lower, upper, image, output_path, bleed):
     mask_image = mask_image.resize(image.size)
     # Create an all-transparent base image
     base_image = PIL.Image.new("RGBA", image.size, color=(0, 0, 0, 0))
+    # Make an image pattern to represent "terrain above" and mask it in
+    if upper in terrains:
+        above_mask_image = bitmap_array_to_image(terrains[upper]).resize(image.size)
+        above_image = PIL.Image.new("RGBA", image.size, color=(0, 0, 0, 0))
+        draw_stripes(above_image)
+        base_image = PIL.Image.composite(above_image, base_image, above_mask_image)
     # Mask them together
     new_image = PIL.Image.composite(image, base_image, mask_image)
     # Save output
