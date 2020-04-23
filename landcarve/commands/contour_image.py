@@ -1,3 +1,4 @@
+import os
 import click
 import gdal
 import numpy
@@ -10,7 +11,12 @@ import svgwrite
 from landcarve.cli import main
 from landcarve.constants import NODATA
 from landcarve.utils.io import array_to_raster, raster_to_array
-from landcarve.utils.graphics import bitmap_array_to_image, draw_border, draw_stripes
+from landcarve.utils.graphics import (
+    bitmap_array_to_image,
+    draw_border,
+    draw_crosshatch,
+    draw_contours,
+)
 
 
 @main.command()
@@ -54,8 +60,15 @@ def contour_image(
     """
     # Load the file using GDAL
     arr = raster_to_array(input_path)
+
     # Load the original image using Pillow
     image = PIL.Image.open(image_path).convert(mode="RGBA")
+
+    # Check output path
+    if not os.path.isdir(output_path):
+        click.error("Output path must be a directory")
+        return 1
+
     # Check contour list
     contour_list = sorted(
         [int(x) if int(x) == float(x) else float(x) for x in contours.split(",")]
@@ -63,123 +76,294 @@ def contour_image(
     contour_list.append(99999999999)
     if len(contour_list) < 3:
         raise ValueError("You must pass at least 2 contour boundaries")
-    # Slice per contour pair for the cuts
-    terrains = {}
-    click.echo("Processing cuts")
-    for lower, upper in zip(contour_list, contour_list[1:]):
-        terrains[lower] = make_cuts(
-            arr,
-            lower,
-            upper,
-            output_path,
-            min_object=min_object,
-            min_hole=min_hole,
-            simp=simp,
-        )
-    # Now do the images
-    click.echo("Processing images")
-    for lower, upper in zip(contour_list, contour_list[1:]):
-        make_image(arr, terrains, lower, upper, image, output_path, bleed=bleed)
+
+    processor = ContourProcessor(
+        arr,
+        image,
+        {
+            "minimum_object": min_object,
+            "minimum_hole": min_hole,
+            "bleed": bleed,
+            "contour_simplification": simp,
+        },
+    )
+    processor.cut_contours(contour_list, output_path)
 
 
-def make_cuts(arr, lower, upper, output_path, min_object, min_hole, simp):
+class ContourProcessor:
     """
-    Calculates the cut lines for one contour range.
+    Takes a heightmap and an image, and outputs images that allow construction
+    of the resulting landscape as contour pieces.
     """
-    # Turn the array into a bitmap of "is it at or above" for the image calculation
-    terrain = numpy.vectorize(lambda x: lower <= x, otypes="?")(arr)
 
-    # Fill small holes
-    hole_threshold = int(terrain.shape[0] * terrain.shape[1] * 0.01 * min_hole)
-    object_threshold = int(terrain.shape[0] * terrain.shape[1] * 0.01 * min_object)
-    terrain = skimage.morphology.remove_small_holes(
-        terrain, area_threshold=hole_threshold, in_place=True
-    )
-    terrain = skimage.morphology.remove_small_objects(
-        terrain, min_size=object_threshold, in_place=True
-    )
+    def __init__(self, base_terrain, detail_image, options=None):
+        self.base_terrain = base_terrain
+        self.detail_image = detail_image
 
-    # Trace contours on that filled terrain
-    contours = skimage.measure.find_contours(terrain, 0.5)
+        # Retrieve options
+        self.options = options or {}
+        self.bleed = int(options.get("bleed", 2))
+        self.contour_simplification = float(options.get("contour_simplification", 0.5))
+        self.minimum_hole = float(options.get("minimum_hole", 0.02))
+        self.minimum_object = float(options.get("minimum_object", 0.05))
 
-    # Write out final SVG with cuts
-    image_filename = "%s-ccuts-%s.svg" % (output_path, lower)
-    drawing = svgwrite.Drawing(
-        image_filename, size=(terrain.shape[1], terrain.shape[0]), profile="tiny"
-    )
-    # Contours
-    for contour in contours:
-        simplified_contour = simplification.cutil.simplify_coords_vw(
-            [(x, y) for (y, x) in contour], simp
+        # Generate the fill image for "land above"
+        self.above_image = PIL.Image.new(
+            "RGBA", self.detail_image.size, color=(0, 0, 0, 0)
         )
+        draw_crosshatch(self.above_image)
+
+    def cut_contours(self, contours, output_path):
+        # Slice the terrain by contours
+        self.terrains = {}
+        click.echo("Slicing terrain...")
+        for lower, upper in zip(contours, contours[1:]):
+            self.terrains[lower] = self.slice_terrain(lower, upper)
+
+        # Generate construction images for each contour
+        click.echo("Generating construction images...")
+        for lower, upper in zip(contours, contours[1:]):
+            click.echo("  Contour %s" % lower)
+            construction_image = self.make_construction_image(lower, upper)
+            construction_image.save(
+                os.path.join(output_path, "contour_%s_construction.png" % lower)
+            )
+
+        # For each terrain, calculate each possible component and generate
+        # image snippets
+        click.echo("Extracting pieces...")
+        pieces = []
+        for lower, upper in zip(contours, contours[1:]):
+            click.echo("  Contour %s" % lower)
+            for piece in self.make_terrain_pieces(lower, upper):
+                # piece["image"].save(
+                #     os.path.join(output_path, "piece_%s.png" % piece["label"])
+                # )
+                pieces.append(piece)
+
+        # Lay out the pieces on pages
+        click.echo("Laying out pages...")
+        for i, page in enumerate(self.layout_pages(pieces, self.detail_image.size), 1):
+            # Save image
+            page.image.save(os.path.join(output_path, "page_%03i_image.png" % i))
+            # Save contours
+            self.contours_to_svg(
+                page.contours,
+                page.image.size,
+                os.path.join(output_path, "page_%03i_contours.svg" % i),
+            )
+            click.echo("  Saved page %i" % i)
+
+    def slice_terrain(self, lower, upper):
+        """
+        Slices a bitmap of "at or above this level" out of the terrain and removes
+        small holes or objects.
+        """
+        # Bitmap based on height
+        terrain = numpy.vectorize(lambda x: lower <= x, otypes="?")(self.base_terrain)
+
+        # Fill small holes
+        hole_threshold = int(
+            terrain.shape[0] * terrain.shape[1] * 0.01 * self.minimum_hole
+        )
+        object_threshold = int(
+            terrain.shape[0] * terrain.shape[1] * 0.01 * self.minimum_object
+        )
+        terrain = skimage.morphology.remove_small_holes(
+            terrain, area_threshold=hole_threshold, in_place=True
+        )
+        terrain = skimage.morphology.remove_small_objects(
+            terrain, min_size=object_threshold, in_place=True
+        )
+        return terrain
+
+    def make_construction_image(self, lower, upper):
+        """
+        Makes a "print image" of this contour - detail for land below or in
+        range, and above_image where there's land above, with cut marks traced.
+        """
+        # Turn the current terrain into a bitmap mask
+        mask_image = bitmap_array_to_image(self.terrains[lower]).resize(
+            self.detail_image.size
+        )
+        # Create a semi-transparent base image
+        image = PIL.Image.new(
+            "RGBA", self.detail_image.size, color=(255, 255, 255, 255)
+        )
+        image = PIL.Image.blend(image, self.detail_image, 0.5)
+        # Layer on the detail
+        image = PIL.Image.composite(self.detail_image, image, mask_image)
+        # Make an image pattern to represent "terrain above" and mask it in if needed
+        if upper in self.terrains:
+            above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
+                self.detail_image.size
+            )
+            image = PIL.Image.composite(self.above_image, image, above_mask_image)
+        # Draw on contours
+        contours = self.convert_and_simplify_contours(
+            skimage.measure.find_contours(self.terrains[lower], 0.5),
+            x_scale=image.size[0] / self.base_terrain.shape[1],
+            y_scale=image.size[1] / self.base_terrain.shape[0],
+        )
+        draw_contours(image, contours)
+        return image
+
+    def make_terrain_pieces(self, lower, upper):
+        """
+        Takes a contour and slices out the pieces, saving them individually for
+        later reconstruction into printable pages.
+        """
+        # Label the pieces of the contour
+        labelled_terrain, num_labels = skimage.measure.label(
+            self.terrains[lower], return_num=True, connectivity=2
+        )
+        # Make an image to cut out pieces from with overhead hatched out
+        empty_image = PIL.Image.new("RGBA", self.detail_image.size, color=(0, 0, 0, 0))
+        full_image = self.detail_image.copy()
+        if upper in self.terrains:
+            above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
+                full_image.size
+            )
+            imfull_imageage = PIL.Image.composite(
+                self.above_image, full_image, above_mask_image
+            )
+        # For each piece, extract
+        for i in range(1, num_labels + 1):
+            # Create a mask array that is just this piece
+            piece_mask = numpy.vectorize(lambda x: x == i, otypes="?")(labelled_terrain)
+            # Bleed the mask out a bit to make a print mask
+            bleed_mask = skimage.morphology.dilation(
+                piece_mask, selem=skimage.morphology.square((self.bleed * 2) + 1)
+            )
+            # Resize both masks up into images
+            piece_mask_image = bitmap_array_to_image(piece_mask).resize(full_image.size)
+            bleed_mask_image = bitmap_array_to_image(bleed_mask).resize(full_image.size)
+            # Composite from the detail image using the bleed mask
+            piece_image = PIL.Image.composite(full_image, empty_image, bleed_mask_image)
+            # Trace the piece's contours
+            contours = self.convert_and_simplify_contours(
+                skimage.measure.find_contours(piece_mask, 0.5),
+                x_scale=full_image.size[0] / piece_mask.shape[1],
+                y_scale=full_image.size[1] / piece_mask.shape[0],
+            )
+            # Work out bounds of the piece we have and cut out the cropped version
+            bounds = piece_image.getbbox()
+            cut_image = piece_image.crop(bounds)
+            # Shift the contours to match
+            contours = [
+                [(x - bounds[0], y - bounds[1]) for x, y in contour]
+                for contour in contours
+            ]
+            # Yield piece
+            yield Piece(label="c%s-%s" % (lower, i), image=cut_image, contours=contours)
+
+    def convert_and_simplify_contours(self, contours, x_scale=1, y_scale=1):
+        """
+        Takes an Array of contours in (y, x) format, simplifies them, and returns
+        as a generator of lists of (x, y) format. Optionally does scaling too.
+        """
+        for contour in contours:
+            yield [
+                ((x_scale / 2) + x * x_scale, (y_scale / 2) + y * y_scale)
+                for y, x in simplification.cutil.simplify_coords_vw(
+                    contour, self.contour_simplification
+                )
+            ]
+
+    def layout_pages(self, pieces, page_size):
+        """
+        Takes the list of pieces and lays them out onto as few printable pages
+        as possible.
+        """
+        # First, order the pieces by size
+        pieces.sort(key=lambda p: p.magnitude, reverse=True)
+        pages = []
+        # Go through each piece and put it on the first page it fits on
+        for i, piece in enumerate(pieces):
+            if i % 5 == 0:
+                print("  Piece %i" % i)
+            # See if it fits on any existing pages
+            for page in pages:
+                offset = page.can_place(piece)
+                if offset is not None:
+                    page.add_piece(piece, offset)
+                    break
+            else:
+                page = Page(page_size)
+                page.add_piece(piece, (0, 0))
+                pages.append(page)
+        return pages
+
+    def contours_to_svg(self, contours, size, filename):
+        """
+        Saves a set of contours as an SVG file
+        """
+        drawing = svgwrite.Drawing(filename, size=(size[0], size[1]), profile="tiny")
+        # Contours
+        for contour in contours:
+            drawing.add(drawing.polyline(points=contour, stroke="black", fill="none"))
+        # Border
         drawing.add(
-            drawing.polyline(points=simplified_contour, stroke="black", fill="none")
+            drawing.rect((0, 0), (size[0], size[1]), stroke="blue", fill="none")
         )
-    # Border
-    drawing.add(
-        drawing.rect(
-            (0, 0), (terrain.shape[1], terrain.shape[0]), stroke="blue", fill="none"
-        )
-    )
-    drawing.save()
-    click.echo("  Saved cut SVG %s" % image_filename)
-
-    # Return terrain mask
-    return terrain
+        drawing.save()
 
 
-def make_image(arr, terrains, lower, upper, image, output_path, bleed):
+class Piece:
     """
-    Calculates the image for one contour range.
+    Represents a single piece that needs printing
     """
-    # Turn the array into a bitmap of "is it in range" for the image calculation,
-    # based on the already-smoothed terrains
-    mask = numpy.copy(terrains[lower])
-    if upper in terrains:
-        for y in range(mask.shape[0]):
-            for x in range(mask.shape[1]):
-                if terrains[upper][y, x]:
-                    mask[y, x] = 0
-    # Bleed that boundary out
-    for i in range(bleed):
-        new_mask = numpy.copy(mask)
-        # Go through each pixel and mark it as True if any of its immediate
-        # neighbours are True
-        for y in range(mask.shape[0]):
-            for x in range(mask.shape[1]):
-                pixel = mask[y, x]
-                if any(
-                    mask[y + dy, x + dx]
-                    for dx, dy in [
-                        (-1, -1),
-                        (0, -1),
-                        (1, -1),
-                        (-1, 0),
-                        (1, 0),
-                        (-1, 1),
-                        (0, 1),
-                        (1, 1),
-                    ]
-                    if (0 <= y + dy < mask.shape[0] and 0 <= x + dx < mask.shape[1])
-                ):
-                    new_mask[y, x] = True
-        mask = new_mask
-    # Turn that into an actual image object (add a border for alignment later)
-    mask_image = bitmap_array_to_image(mask)
-    draw_border(mask_image, colour=1)
-    # Scale it to match the original image size
-    mask_image = mask_image.resize(image.size)
-    # Create an all-transparent base image
-    base_image = PIL.Image.new("RGBA", image.size, color=(0, 0, 0, 0))
-    # Make an image pattern to represent "terrain above" and mask it in
-    if upper in terrains:
-        above_mask_image = bitmap_array_to_image(terrains[upper]).resize(image.size)
-        above_image = PIL.Image.new("RGBA", image.size, color=(0, 0, 0, 0))
-        draw_stripes(above_image)
-        base_image = PIL.Image.composite(above_image, base_image, above_mask_image)
-    # Mask them together
-    new_image = PIL.Image.composite(image, base_image, mask_image)
-    # Save output
-    image_filename = "%s-cimage-%s.png" % (output_path, lower)
-    new_image.save(image_filename)
-    click.echo("  Saved image %s" % image_filename)
+
+    def __init__(self, label, image, contours):
+        self.label = label
+        self.image = image
+        self.size = self.image.size
+        self.magnitude = self.size[0] * self.size[1]
+        self.contours = contours
+
+
+class Page:
+    """
+    Represents a single page containing one or more pieces to print
+    """
+
+    def __init__(self, size):
+        self.size = size
+        self.image = PIL.Image.new("RGBA", self.size, color=(0, 0, 0, 0))
+        self.contours = []
+
+    def add_piece(self, piece, offset):
+        self.image.alpha_composite(piece.image, dest=offset)
+        for contour in piece.contours:
+            self.contours.append([(x + offset[0], y + offset[1]) for x, y in contour])
+
+    def can_place(self, piece):
+        """
+        Works out if the given piece will fit on the page. Returns None if not,
+        or the offset it can have if it will.
+        """
+        for y in range(0, self.size[1], 100):
+            for x in range(0, self.size[0], 100):
+                if self.can_place_at(piece, (x, y)):
+                    return (x, y)
+        return None
+
+    def can_place_at(self, piece, offset):
+        # Check dimensions
+        if (offset[0] + piece.size[0] > self.size[0]) or (
+            offset[1] + piece.size[1] > self.size[1]
+        ):
+            return False
+        # Initial quick pass
+        for dx in range(0, piece.size[0], int(piece.size[0] / 10)):
+            for dy in range(0, piece.size[1], int(piece.size[1] / 10)):
+                if piece.image.getpixel((dx, dy))[3]:
+                    if self.image.getpixel((offset[0] + dx, offset[1] + dy))[3]:
+                        return False
+        # Full pass
+        for dx in range(0, piece.size[0]):
+            for dy in range(0, piece.size[1]):
+                if piece.image.getpixel((dx, dy))[3]:
+                    if self.image.getpixel((offset[0] + dx, offset[1] + dy))[3]:
+                        return False
+        return True
