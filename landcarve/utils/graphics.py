@@ -1,5 +1,7 @@
+import os
 import PIL.Image
 import PIL.ImageDraw
+import PIL.ImageFont
 
 
 def bitmap_array_to_image(array):
@@ -37,7 +39,16 @@ def draw_crosshatch(image, colour=(10, 10, 10, 255), step=20, width=1):
         d.line([x, 0, x + max_size, max_size], colour, width=width)
 
 
-def draw_contours(image, contours, colour=(200, 10, 200, 255), step=20, width=2):
+def draw_contours(image, contours, colour=(200, 10, 200, 255), width=2):
     d = PIL.ImageDraw.Draw(image)
     for contour in contours:
         d.line(contour, colour, width=width)
+
+
+def draw_labels(image, labels, colour=(200, 10, 200, 255), size=15):
+    d = PIL.ImageDraw.Draw(image)
+    font = PIL.ImageFont.truetype(
+        os.path.join(os.path.dirname(__file__), "../arial.ttf"), size=size
+    )
+    for label, offset in labels:
+        d.text(offset, label, fill=colour, font=font)

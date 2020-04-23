@@ -16,6 +16,7 @@ from landcarve.utils.graphics import (
     draw_border,
     draw_crosshatch,
     draw_contours,
+    draw_labels,
 )
 
 
@@ -44,12 +45,33 @@ from landcarve.utils.graphics import (
     type=int,
     help="Number of pixels (on the input) to bleed over the image for cutting",
 )
+@click.option(
+    "--line-scale",
+    default=2,
+    type=int,
+    help="Scaling factor for graphical elements in the output",
+)
+@click.option(
+    "--page-size",
+    default=None,
+    type=str,
+    help="Page size in pixels for the output, if different to the input image size",
+)
 @click.argument("input_path")
 @click.argument("output_path")
 @click.argument("image_path")
 @click.argument("contours")
 def contour_image(
-    input_path, output_path, image_path, contours, bleed, min_object, min_hole, simp
+    input_path,
+    output_path,
+    image_path,
+    contours,
+    bleed,
+    min_object,
+    min_hole,
+    simp,
+    line_scale,
+    page_size,
 ):
     """
     Slices a terrain into contour segments and then outputs an image and a cut
@@ -61,7 +83,7 @@ def contour_image(
     # Load the file using GDAL
     arr = raster_to_array(input_path)
 
-    # Load the original image using Pillow
+    # Load the original map details image using Pillow
     image = PIL.Image.open(image_path).convert(mode="RGBA")
 
     # Check output path
@@ -77,6 +99,11 @@ def contour_image(
     if len(contour_list) < 3:
         raise ValueError("You must pass at least 2 contour boundaries")
 
+    # Process any page size string
+    if page_size:
+        page_size = [int(x) for x in page_size.replace(",", "x").split("x")]
+        assert len(page_size) == 2
+
     processor = ContourProcessor(
         arr,
         image,
@@ -85,9 +112,10 @@ def contour_image(
             "minimum_hole": min_hole,
             "bleed": bleed,
             "contour_simplification": simp,
+            "line_scale": line_scale,
         },
     )
-    processor.cut_contours(contour_list, output_path)
+    processor.cut_contours(contour_list, output_path, page_size=page_size)
 
 
 class ContourProcessor:
@@ -106,14 +134,19 @@ class ContourProcessor:
         self.contour_simplification = float(options.get("contour_simplification", 0.5))
         self.minimum_hole = float(options.get("minimum_hole", 0.02))
         self.minimum_object = float(options.get("minimum_object", 0.05))
+        self.line_scale = int(options.get("line_scale", 2))
 
         # Generate the fill image for "land above"
         self.above_image = PIL.Image.new(
             "RGBA", self.detail_image.size, color=(0, 0, 0, 0)
         )
-        draw_crosshatch(self.above_image)
+        draw_crosshatch(
+            self.above_image,
+            step=15 * self.line_scale,
+            width=int(self.line_scale / 2) or 1,
+        )
 
-    def cut_contours(self, contours, output_path):
+    def cut_contours(self, contours, output_path, page_size):
         # Slice the terrain by contours
         self.terrains = {}
         click.echo("Slicing terrain...")
@@ -143,7 +176,9 @@ class ContourProcessor:
 
         # Lay out the pieces on pages
         click.echo("Laying out pages...")
-        for i, page in enumerate(self.layout_pages(pieces, self.detail_image.size), 1):
+        for i, page in enumerate(
+            self.layout_pages(pieces, page_size or self.detail_image.size), 1
+        ):
             # Save image
             page.image.save(os.path.join(output_path, "page_%03i_image.png" % i))
             # Save contours
@@ -151,6 +186,10 @@ class ContourProcessor:
                 page.contours,
                 page.image.size,
                 os.path.join(output_path, "page_%03i_contours.svg" % i),
+            )
+            # Save mapping image
+            self.make_guide_image(page).save(
+                os.path.join(output_path, "page_%03i_guide.png" % i)
             )
             click.echo("  Saved page %i" % i)
 
@@ -205,7 +244,7 @@ class ContourProcessor:
             x_scale=image.size[0] / self.base_terrain.shape[1],
             y_scale=image.size[1] / self.base_terrain.shape[0],
         )
-        draw_contours(image, contours)
+        draw_contours(image, contours, width=self.line_scale)
         return image
 
     def make_terrain_pieces(self, lower, upper):
@@ -224,13 +263,19 @@ class ContourProcessor:
             above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
                 full_image.size
             )
-            imfull_imageage = PIL.Image.composite(
+            full_image = PIL.Image.composite(
                 self.above_image, full_image, above_mask_image
             )
         # For each piece, extract
         for i in range(1, num_labels + 1):
-            # Create a mask array that is just this piece
+            # Create a mask array that is just this piece, cutting around the border to force contours
             piece_mask = numpy.vectorize(lambda x: x == i, otypes="?")(labelled_terrain)
+            for x in range(0, piece_mask.shape[1]):
+                for y in (0, piece_mask.shape[0] - 1):
+                    piece_mask[y, x] = 0
+            for y in range(0, piece_mask.shape[0]):
+                for x in (0, piece_mask.shape[1] - 1):
+                    piece_mask[y, x] = 0
             # Bleed the mask out a bit to make a print mask
             bleed_mask = skimage.morphology.dilation(
                 piece_mask, selem=skimage.morphology.square((self.bleed * 2) + 1)
@@ -255,7 +300,7 @@ class ContourProcessor:
                 for contour in contours
             ]
             # Yield piece
-            yield Piece(label="c%s-%s" % (lower, i), image=cut_image, contours=contours)
+            yield Piece(layer="c%s" % lower, image=cut_image, contours=contours)
 
     def convert_and_simplify_contours(self, contours, x_scale=1, y_scale=1):
         """
@@ -294,6 +339,20 @@ class ContourProcessor:
                 pages.append(page)
         return pages
 
+    def make_guide_image(self, page):
+        """
+        Makes a version of the page image that shows what layers each piece
+        belongs to.
+        """
+        # Dim main image
+        image = PIL.Image.new("RGBA", page.image.size, color=(255, 255, 255, 255))
+        image = PIL.Image.blend(image, page.image, 0.9)
+        # Draw on contours
+        draw_contours(image, page.contours, width=self.line_scale)
+        # Draw on labels
+        draw_labels(image, page.labels, size=10 * self.line_scale)
+        return image
+
     def contours_to_svg(self, contours, size, filename):
         """
         Saves a set of contours as an SVG file
@@ -314,8 +373,8 @@ class Piece:
     Represents a single piece that needs printing
     """
 
-    def __init__(self, label, image, contours):
-        self.label = label
+    def __init__(self, layer, image, contours):
+        self.layer = layer
         self.image = image
         self.size = self.image.size
         self.magnitude = self.size[0] * self.size[1]
@@ -331,11 +390,13 @@ class Page:
         self.size = size
         self.image = PIL.Image.new("RGBA", self.size, color=(0, 0, 0, 0))
         self.contours = []
+        self.labels = []
 
     def add_piece(self, piece, offset):
         self.image.alpha_composite(piece.image, dest=offset)
         for contour in piece.contours:
             self.contours.append([(x + offset[0], y + offset[1]) for x, y in contour])
+            self.labels.append((piece.layer, self.contours[-1][0]))
 
     def can_place(self, piece):
         """
