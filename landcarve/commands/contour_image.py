@@ -260,9 +260,12 @@ class ContourProcessor:
         empty_image = PIL.Image.new("RGBA", self.detail_image.size, color=(0, 0, 0, 0))
         full_image = self.detail_image.copy()
         if upper in self.terrains:
-            above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
-                full_image.size
-            )
+            above_mask_image = bitmap_array_to_image(
+                skimage.morphology.erosion(
+                    self.terrains[upper],
+                    selem=skimage.morphology.square((self.bleed * 2) + 1),
+                )
+            ).resize(full_image.size)
             full_image = PIL.Image.composite(
                 self.above_image, full_image, above_mask_image
             )
@@ -391,6 +394,13 @@ class Page:
         self.image = PIL.Image.new("RGBA", self.size, color=(0, 0, 0, 0))
         self.contours = []
         self.labels = []
+        # Add a 1px border to the image for alignment
+        for x in range(0, self.size[0]):
+            for y in (0, self.size[1] - 1):
+                self.image.putpixel((x, y), (0, 0, 0, 255))
+        for x in (0, self.size[0] - 1):
+            for y in range(0, self.size[1]):
+                self.image.putpixel((x, y), (0, 0, 0, 255))
 
     def add_piece(self, piece, offset):
         self.image.alpha_composite(piece.image, dest=offset)
