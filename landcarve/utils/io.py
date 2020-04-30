@@ -1,3 +1,8 @@
+import io
+import PIL.Image
+import os
+import subprocess
+import requests
 from osgeo import gdal
 
 
@@ -29,3 +34,41 @@ def array_to_raster(arr, output_path):
     outband.SetNoDataValue(-1000)
     outband.WriteArray(arr)
     outband.FlushCache()
+
+
+def download_image(url):
+    """
+    Downloads a URL into an Image object
+    """
+    r = requests.get(url)
+    if r.status_code != 200:
+        raise ValueError("Cannot download URL %s: %s" % (url, r.content))
+    return PIL.Image.open(io.BytesIO(r.content))
+
+
+def save_geotiff(image, x1, y1, x2, y2, path, proj="EPSG:4326"):
+    """
+    Saves an image as a GeoTIFF with the given coordinates as the corners.
+    """
+    # Save image out
+    temp_path = path + ".temp.png"
+    image.save(temp_path)
+    # Use gdal_translate to add GCPs
+    subprocess.check_call(
+        [
+            "gdal_translate",
+            "-a_ullr",
+            str(x1),
+            str(y1),
+            str(x2),
+            str(y2),
+            "-a_srs",
+            proj,
+            "-of",
+            "GTiff",
+            temp_path,
+            path,
+        ]
+    )
+    # Delete temp file
+    os.unlink(temp_path)

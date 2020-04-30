@@ -24,6 +24,7 @@ setup(
         "click~=7.0",
         "svgwrite~=1.4",
         "scikit-image~=0.16",
+        "requests~=2.18",
     ],
     entry_points={"console_scripts": ["landcarve = landcarve.cli:main"]},
 )
