@@ -34,12 +34,13 @@ def zfit(input_path, output_path, fit):
     array_to_raster(arr, output_path)
 
 
-def value_range(arr, NODATA):
+def value_range(arr, NODATA=NODATA):
     """
     Given an array and a NODATA limit, returns the range of values in the array.
     """
     min_value = max_value = None
     for value in numpy.nditer(arr):
+        value = value.item()
         if value > NODATA:
             if min_value is None or value < min_value:
                 min_value = value

@@ -9,6 +9,7 @@ import simplification.cutil
 import svgwrite
 
 from landcarve.cli import main
+from landcarve.commands.zfit import value_range
 from landcarve.constants import NODATA
 from landcarve.utils.io import array_to_raster, raster_to_array
 from landcarve.utils.graphics import (
@@ -92,12 +93,23 @@ def contour_image(
         return 1
 
     # Check contour list
-    contour_list = sorted(
-        [int(x) if int(x) == float(x) else float(x) for x in contours.split(",")]
-    )
-    contour_list.append(99999999999)
-    if len(contour_list) < 3:
-        raise ValueError("You must pass at least 2 contour boundaries")
+    if contours.startswith("a"):
+        # Automatic contours
+        num = int(contours[1:])
+        min_value, max_value = value_range(arr)
+        min_value = int(min_value)
+        max_value = int(max_value)
+        contour_step = int((max_value - min_value) / num)
+        contour_list = list(range(min_value, max_value, contour_step)) + [max_value + 1]
+        click.echo("Automatic contours: " + (", ".join([str(c) for c in contour_list])))
+    else:
+        # Manual contours
+        contour_list = sorted(
+            [int(x) if int(x) == float(x) else float(x) for x in contours.split(",")]
+        )
+        contour_list.append(99999999999)
+        if len(contour_list) < 3:
+            raise ValueError("You must pass at least 2 contour boundaries")
 
     # Process any page size string
     if page_size:
