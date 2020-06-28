@@ -42,7 +42,7 @@ from landcarve.utils.graphics import (
 )
 @click.option(
     "--bleed",
-    default=2,
+    default=3,
     type=int,
     help="Number of pixels (on the input) to bleed over the image for cutting",
 )
@@ -150,7 +150,7 @@ class ContourProcessor:
 
         # Generate the fill image for "land above"
         self.above_image = PIL.Image.new(
-            "RGBA", self.detail_image.size, color=(0, 0, 0, 0)
+            "RGBA", self.detail_image.size, color=(255, 255, 255, 255)
         )
         draw_crosshatch(
             self.above_image,
