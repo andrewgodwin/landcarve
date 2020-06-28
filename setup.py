@@ -19,12 +19,13 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        "gdal~=2.0",
+        "gdal~=3.0",
         "numpy~=1.16",
         "click~=7.0",
         "svgwrite~=1.4",
         "scikit-image~=0.16",
         "requests~=2.18",
+        "simplification~=0.5",
     ],
     entry_points={"console_scripts": ["landcarve = landcarve.cli:main"]},
 )
