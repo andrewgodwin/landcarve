@@ -8,16 +8,17 @@ from landcarve.utils.io import download_image, save_geotiff
 
 @main.command()
 @click.option("--zoom", type=int, default=13)
+@click.option("--invert-y/--no-invert-y", default=False)
 @click.argument("coords")
 @click.argument("output_path")
 @click.argument("xyz_url")
-def tileimage(coords, output_path, xyz_url, zoom):
+def tileimage(coords, output_path, xyz_url, zoom, invert_y):
     """
     Fetches tiles from an XYZ server and outputs a georeferenced image (of whole tiles)
     """
     tile_size = (256, 256)
     # Extract coordinates
-    lat1, long1, lat2, long2 = [float(n) for n in coords.split(",")]
+    lat1, long1, lat2, long2 = [float(n) for n in coords.lstrip(",").split(",")]
     # Turn those into tile coordinates, ensuring correct ordering
     x1, y2 = latlong_to_xy(lat1, long1, zoom)
     x2, y1 = latlong_to_xy(lat2, long2, zoom)
@@ -35,11 +36,21 @@ def tileimage(coords, output_path, xyz_url, zoom):
         click.echo(f"Downloading row {x}", nl=False)
         for y in range(y1, y2 + 1):
             click.echo(".", nl=False)
-            tile = download_image(
-                xyz_url.replace("{x}", str(x))
-                .replace("{y}", str(y))
-                .replace("{z}", str(zoom))
-            )
+            # If invert-y mode is on, flip image download path
+            if invert_y:
+                max_y = 2 ** zoom
+                url = (
+                    xyz_url.replace("{x}", str(x))
+                    .replace("{y}", str(max_y - y))
+                    .replace("{z}", str(zoom))
+                )
+            else:
+                url = (
+                    xyz_url.replace("{x}", str(x))
+                    .replace("{y}", str(y))
+                    .replace("{z}", str(zoom))
+                )
+            tile = download_image(url)
             assert tile.size == tile_size, f"Downloaded tile has wrong size {tile.size}"
             image.paste(tile, ((x - x1) * tile_size[0], (y - y1) * tile_size[1]))
         click.echo("")
