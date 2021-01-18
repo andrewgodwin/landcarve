@@ -41,6 +41,14 @@ def realise(
         arr = numpy.vectorize(
             lambda x: max(0, x - minimum) if x > NODATA else None, otypes=[object]
         )(arr)
+    # Work out bounds and print them
+    max_value = 0
+    for index, value in numpy.ndenumerate(arr):
+        if value and value > max_value:
+            max_value = value
+    print(
+        f"X size: {arr.shape[1]*xy_scale:.2f}  Y size: {arr.shape[0]*xy_scale:.2f}  Z size: {max_value*z_scale:.2f}"
+    )
     # For each value in the array, output appropriate polygons
     bottom = 0 - (base / z_scale)
     with click.progressbar(length=arr.shape[0], label="Calculating mesh") as bar:
