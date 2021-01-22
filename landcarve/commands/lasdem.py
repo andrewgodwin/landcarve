@@ -94,7 +94,7 @@ def find_nearest_neighbour(arr, x, y):
                 and new_x < arr.shape[0]
                 and new_y >= 0
                 and new_y < arr.shape[1]
-                and arr[x][y] > NODATA
+                and arr[new_x][new_y] > NODATA
             ):
-                return arr[x][y]
+                return arr[new_x][new_y]
     return NODATA
