@@ -19,16 +19,36 @@ def raster_to_array(input_path):
     return arr
 
 
-def array_to_raster(arr, output_path):
+def array_to_raster(arr, output_path, offset_and_pixel=None, projection=None):
     """
     Takes a NumPy array and outputs it to a GDAL file.
+
+    offset_and_pixel is (x offset, y offset, pixel width, pixel height)
     """
     if output_path == "-":
         output_path = "/dev/stdout"
     driver = gdal.GetDriverByName("GTiff")
     outdata = driver.Create(
-        output_path, arr.shape[1], arr.shape[0], 1, gdal.GDT_Float32
+        output_path,
+        xsize=arr.shape[1],
+        ysize=arr.shape[0],
+        bands=1,
+        eType=gdal.GDT_Float32,
     )
+    # Set projection and transform if we have them
+    if offset_and_pixel:
+        outdata.SetGeoTransform(
+            [
+                offset_and_pixel[0],  # X offset
+                offset_and_pixel[2],  # Pixel width
+                0,  # Rotation coefficient 1
+                offset_and_pixel[1],  # Y offset
+                0,  # Rotation coefficient 2
+                offset_and_pixel[3],  # Pixel height
+            ]
+        )
+    if projection:
+        outdata.SetProjection(projection)
     outband = outdata.GetRasterBand(1)
     # TODO: Use global nodata value?
     outband.SetNoDataValue(-1000)
