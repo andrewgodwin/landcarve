@@ -13,6 +13,7 @@ def main():
 import landcarve.commands.contour_image
 import landcarve.commands.decifit
 import landcarve.commands.fixnodata
+import landcarve.commands.lasdem
 import landcarve.commands.pipeline
 import landcarve.commands.realise
 import landcarve.commands.smooth

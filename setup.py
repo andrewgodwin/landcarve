@@ -26,6 +26,7 @@ setup(
         "scikit-image~=0.16",
         "requests~=2.18",
         "simplification~=0.5",
+        "laspy~=1.7.0",
     ],
     entry_points={"console_scripts": ["landcarve = landcarve.cli:main"]},
 )
