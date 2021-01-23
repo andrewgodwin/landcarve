@@ -9,6 +9,7 @@ from osgeo import osr
 from landcarve.cli import main
 from landcarve.constants import NODATA
 from landcarve.utils.io import array_to_raster
+from landcarve.commands.smooth import mean, pstdev, clip
 
 
 @main.command()
@@ -27,9 +28,16 @@ from landcarve.utils.io import array_to_raster
     type=int,
     help="Maximum elevation to trust; discard anything above",
 )
+@click.option(
+    "-s",
+    "--despeckle",
+    default=1,
+    type=int,
+    help="Despeckle factor; higher is stronger. 0 to disable.",
+)
 @click.argument("input_paths", nargs=-1)
 @click.argument("output_path")
-def lasdem(input_paths, output_path, snap, void_distance, z_limit):
+def lasdem(input_paths, output_path, snap, void_distance, z_limit, despeckle):
     """
     Turns a raw .las or .laz file into a DEM
     """
@@ -87,7 +95,7 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit):
     click.echo(f"Final DEM size {x_size}x{y_size}")
 
     # Create a new array to hold the data
-    arr = numpy.full((x_size, y_size), NODATA, dtype=numpy.float)
+    arr = numpy.full((y_size, x_size), NODATA, dtype=numpy.float)
 
     # For each point, bucket it into the right array coord
     with click.progressbar(length=num_points, label="Thinning") as bar:
@@ -125,6 +133,22 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit):
                     voids.remove((x, y))
     click.echo("Removed %s / %s voids" % (num_voids - len(voids), num_voids))
 
+    # Despeckle any single pixels that are weirdly high/low
+    if despeckle:
+        with click.progressbar(length=arr.shape[0], label="Despeckling") as bar:
+            for y in range(arr.shape[0]):
+                bar.update(1)
+                for x in range(arr.shape[1]):
+                    # Find its four direct neighbours and weight on their values
+                    others = get_neighbours(arr, x, y)
+                    if len(others) < 3:
+                        continue
+                    m = mean(others)
+                    s = pstdev(others)
+                    limit = s * (1 / despeckle)
+                    if abs(arr[y][x] - m) > limit:
+                        arr[y][x] = find_nearest_neighbour(arr, x, y)
+
     # Write out a TIF
     array_to_raster(
         arr,
@@ -132,6 +156,30 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit):
         offset_and_pixel=(min_x, min_y, snap, snap),
         projection=projection,
     )
+
+
+def get_neighbours(arr, x, y):
+    """
+    Finds the nearest non-NODATA value to x, y
+    """
+    values = []
+    for dx, dy in [
+        (1, 0),
+        (0, 1),
+        (-1, 0),
+        (0, -1),
+    ]:
+        new_x = x + dx
+        new_y = y + dy
+        if (
+            new_x >= 0
+            and new_x < arr.shape[1]
+            and new_y >= 0
+            and new_y < arr.shape[0]
+            and arr[new_y][new_x] > NODATA
+        ):
+            values.append(arr[new_y][new_x])
+    return values
 
 
 def find_nearest_neighbour(arr, x, y):
