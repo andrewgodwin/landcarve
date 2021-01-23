@@ -87,6 +87,14 @@ Commands
 --------
 
 
+bulkget
+~~~~~~~
+
+Takes a text file containing a list of URLs and downloads only the "interesting"
+ones to a local folder. Designed for use with the USGS National Map download
+feature.
+
+
 decifit
 ~~~~~~~
 
@@ -110,6 +118,17 @@ All the rest of the tools in the suite assume a NODATA value of -1000. If you
 have source data that is not aligned, use this pipeline step to set anything
 equal or lower to the value of ``--nodata`` you pass to the internal NODATA
 value.
+
+
+lasdem
+~~~~~~
+
+Options:
+    * ``--snap``: Quantization factor in projection units (XY symmetrical). Default: 1
+    * ``--void-distance``: How far to search for void-filling neighbours. Default: 10
+
+Takes one or more LAS (or LAZ) files, thins them (by highest return elevation),
+and turns them into a GeoTIFF DEM.
 
 
 realise
