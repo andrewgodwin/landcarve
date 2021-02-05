@@ -16,7 +16,7 @@ from landcarve.utils.io import raster_to_array
 @click.option("--xy-scale", default=1.0, help="X/Y scale to use")
 @click.option("--z-scale", default=1.0, help="Z scale to use")
 @click.option("--minimum", default=0.0, help="Minimum depth (zero point)")
-@click.option("--base", default=1.0, help="Base thickness")
+@click.option("--base", default=1.0, help="Base thickness (in mm)")
 @click.option(
     "--simplify/--no-simplify", default=True, help="Apply simplification to final model"
 )

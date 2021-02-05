@@ -19,6 +19,19 @@ def raster_to_array(input_path):
     return arr
 
 
+def raster_to_array_and_projection(input_path):
+    """
+    Takes an input raster file and turns it into a NumPy array.
+    Only takes band 1 for now.
+    """
+    if input_path == "-":
+        input_path = "/dev/stdin"
+    raster = gdal.Open(input_path)
+    band = raster.GetRasterBand(1)
+    arr = band.ReadAsArray()
+    return arr, raster.GetProjection()
+
+
 def array_to_raster(arr, output_path, offset_and_pixel=None, projection=None):
     """
     Takes a NumPy array and outputs it to a GDAL file.
