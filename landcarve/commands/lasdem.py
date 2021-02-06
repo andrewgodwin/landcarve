@@ -35,9 +35,20 @@ from landcarve.commands.smooth import mean, pstdev, clip
     type=int,
     help="Despeckle factor; higher is stronger. 0 to disable.",
 )
+@click.option(
+    "--ignore-header-range", type=bool, default=False,
+)
 @click.argument("input_paths", nargs=-1)
 @click.argument("output_path")
-def lasdem(input_paths, output_path, snap, void_distance, z_limit, despeckle):
+def lasdem(
+    input_paths,
+    output_path,
+    snap,
+    void_distance,
+    z_limit,
+    despeckle,
+    ignore_header_range,
+):
     """
     Turns a raw .las or .laz file into a DEM
     """
@@ -79,10 +90,16 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit, despeckle):
     num_points = 0
     for las in las_files:
         num_points += las.points.shape[0]
-        min_x = min(min_x, las.x.min())
-        max_x = max(max_x, las.x.max())
-        min_y = min(min_y, las.y.min())
-        max_y = max(max_y, las.y.max())
+        if ignore_header_range:
+            min_x = min(min_x, las.x.min())
+            max_x = max(max_x, las.x.max())
+            min_y = min(min_y, las.y.min())
+            max_y = max(max_y, las.y.max())
+        else:
+            min_x = min(min_x, las.header.min[0])
+            max_x = max(max_x, las.header.max[0])
+            min_y = min(min_y, las.header.min[1])
+            max_y = max(max_y, las.header.max[1])
 
     # Calculate the size of the final array
     x_index = functools.lru_cache(maxsize=10240)(lambda v: int((v - min_x) // snap))
@@ -96,6 +113,7 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit, despeckle):
 
     # Create a new array to hold the data
     arr = numpy.full((y_size, x_size), NODATA, dtype=numpy.float)
+    ignored_points = 0
 
     # For each point, bucket it into the right array coord
     with click.progressbar(length=num_points, label="Thinning") as bar:
@@ -103,6 +121,9 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit, despeckle):
         for las in las_files:
             points = numpy.vstack((las.x, las.y, las.z)).T
             for i, (x, y, z) in enumerate(points):
+                if x < min_x or x > max_x or y < min_y or y > max_y:
+                    ignored_points += 1
+                    continue
                 if z <= z_limit:
                     new_x = x_index(x)
                     new_y = y_index(y)
@@ -111,6 +132,9 @@ def lasdem(input_paths, output_path, snap, void_distance, z_limit, despeckle):
                 if n > 1000:
                     bar.update(1000)
                     n = 0
+
+    if ignored_points:
+        click.echo(f"Ignored {ignored_points} points")
 
     # Scan for all voids in the array
     voids = set()
