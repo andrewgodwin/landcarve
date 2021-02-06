@@ -19,6 +19,7 @@ import landcarve.commands.lasdem
 import landcarve.commands.pipeline
 import landcarve.commands.realise
 import landcarve.commands.smooth
+import landcarve.commands.stats
 import landcarve.commands.step
 import landcarve.commands.tileimage
 import landcarve.commands.tilesplit

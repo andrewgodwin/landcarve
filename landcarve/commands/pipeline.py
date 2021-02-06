@@ -19,11 +19,11 @@ def pipeline(input_paths, extension, pipeline_file):
     """
     Runs a series of commands from a predefined pipeline, handling file passing.
     """
-    temporary_file_counter = 1
-    input_is_temporary = False
     # Load the pipeline file into memory
     click.echo("Pipeline: %s" % pipeline_file, err=True)
     pipeline = []
+    if not extension.startswith("."):
+        extension = "." + extension
     for line in open(pipeline_file):
         # Skip blank lines and comments
         line = line.strip()
@@ -35,6 +35,8 @@ def pipeline(input_paths, extension, pipeline_file):
         click.echo(click.style(f"Running on {input_path}", fg="blue", bold=True))
         # Run through the pipeline
         current_path = input_path
+        temporary_file_counter = 1
+        input_is_temporary = False
         with tempfile.TemporaryDirectory(prefix="landcarve-") as tmpdir:
             for i, line in enumerate(pipeline):
                 # Work out input/output filenames

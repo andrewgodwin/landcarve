@@ -14,15 +14,16 @@ from landcarve.cli import main
 def bulkget(input_path, output_path):
     """
     Bulk downloads information from the national map downloader, auto-filtering
-    out useless URLs.
+    out "useless" URLs.
     """
     # Calculate the correct set of urls
     urls = []
     with open(input_path) as fh:
         for line in fh:
             line = line.strip()
-            if line.endswith(".laz"):
-                urls.append(line)
+            if "metadata" in line or line.endswith(".html") or line.endswith("/"):
+                continue
+            urls.append(line)
     # Download them
     for n, url in enumerate(urls):
         filename = url.split("/")[-1]
