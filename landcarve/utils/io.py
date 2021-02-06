@@ -1,5 +1,6 @@
 import io
 import PIL.Image
+import numpy
 import os
 import subprocess
 import requests
@@ -41,6 +42,7 @@ def array_to_raster(arr, output_path, offset_and_pixel=None, projection=None):
     if output_path == "-":
         output_path = "/dev/stdout"
     driver = gdal.GetDriverByName("GTiff")
+    arr = numpy.flipud(arr)
     outdata = driver.Create(
         output_path,
         xsize=arr.shape[1],
@@ -55,9 +57,9 @@ def array_to_raster(arr, output_path, offset_and_pixel=None, projection=None):
                 offset_and_pixel[0],  # X offset
                 offset_and_pixel[2],  # Pixel width
                 0,  # Rotation coefficient 1
-                offset_and_pixel[1],  # Y offset
+                offset_and_pixel[1] + arr.shape[0],  # Y offset
                 0,  # Rotation coefficient 2
-                offset_and_pixel[3],  # Pixel height
+                -offset_and_pixel[3],  # Pixel height
             ]
         )
     if projection:

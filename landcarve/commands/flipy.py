@@ -16,7 +16,7 @@ def flipy(input_path, output_path):
     # Load the file using GDAL
     arr = raster_to_array(input_path)
     # Run stepper
-    numpy.flipud(arr)
+    arr = numpy.flipud(arr)
     click.echo("Array flipped up/down")
     # Write out the array
     array_to_raster(arr, output_path)
