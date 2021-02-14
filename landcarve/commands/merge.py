@@ -1,4 +1,5 @@
 import click
+import subprocess
 
 from landcarve.cli import main
 
@@ -13,4 +14,4 @@ def merge(
     Merges DEMs together
     """
 
-    subprocess.call(["gdal_merge.py", "-o", output_path, input_paths])
+    subprocess.call(["gdal_merge.py", "-o", output_path] + list(input_paths))

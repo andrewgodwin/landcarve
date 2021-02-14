@@ -17,6 +17,9 @@ def raster_to_array(input_path):
     raster = gdal.Open(input_path)
     band = raster.GetRasterBand(1)
     arr = band.ReadAsArray()
+    # If it's a negative-pixel thing, flip it
+    # if raster.GetGeoTransform()[5] < 0:
+    #    arr = numpy.flipud(arr)
     return arr
 
 
