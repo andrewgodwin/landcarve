@@ -21,15 +21,27 @@ from landcarve.utils.io import raster_to_array
     "--simplify/--no-simplify", default=True, help="Apply simplification to final model"
 )
 @click.option("--solid/--not-solid", default=False, help="Force a solid, square base")
+@click.option("--flipy/--no-flipy", default=False, help="Flip model Y axis")
 @click.pass_context
 def realise(
-    ctx, input_path, output_path, xy_scale, z_scale, minimum, base, simplify, solid
+    ctx,
+    input_path,
+    output_path,
+    xy_scale,
+    z_scale,
+    minimum,
+    base,
+    simplify,
+    solid,
+    flipy,
 ):
     """
     Turns a DEM array into a 3D model.
     """
     # Load the file using GDAL
     arr = raster_to_array(input_path)
+    if flipy:
+        arr = numpy.flipud(arr)
     # Open the target STL file
     mesh = Mesh(scale=(xy_scale, xy_scale, z_scale))
     # Apply the minimum constraint

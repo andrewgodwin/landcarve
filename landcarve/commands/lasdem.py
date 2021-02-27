@@ -9,7 +9,7 @@ from osgeo import osr
 from landcarve.cli import main
 from landcarve.constants import NODATA
 from landcarve.utils.io import array_to_raster
-from landcarve.commands.smooth import mean, pstdev, clip
+from landcarve.utils.stats import mean, pstdev, clip
 
 
 @main.command()
