@@ -58,6 +58,11 @@ from landcarve.utils.graphics import (
     type=str,
     help="Page size in pixels for the output, if different to the input image size",
 )
+@click.option(
+    "--rigid/--non-rigid",
+    default=False,
+    help="Leave holes inside of terrain to save on material",
+)
 @click.argument("input_path")
 @click.argument("output_path")
 @click.argument("image_path")
@@ -73,6 +78,7 @@ def contour_image(
     simp,
     line_scale,
     page_size,
+    rigid,
 ):
     """
     Slices a terrain into contour segments and then outputs an image and a cut
@@ -125,6 +131,7 @@ def contour_image(
             "bleed": bleed,
             "contour_simplification": simp,
             "line_scale": line_scale,
+            "fill_terrain": not rigid,
         },
     )
     processor.cut_contours(contour_list, output_path, page_size=page_size)
@@ -147,8 +154,12 @@ class ContourProcessor:
         self.minimum_hole = float(options.get("minimum_hole", 0.02))
         self.minimum_object = float(options.get("minimum_object", 0.05))
         self.line_scale = int(options.get("line_scale", 2))
+        self.fill_terrain = options.get("fill_terrain", True)
 
-        # Generate the fill image for "land above"
+        # Generate the fill images for "land above"
+        self.transparent_image = PIL.Image.new(
+            "RGBA", self.detail_image.size, color=(255, 255, 255, 0)
+        )
         self.above_image = PIL.Image.new(
             "RGBA", self.detail_image.size, color=(255, 255, 255, 255)
         )
@@ -211,7 +222,10 @@ class ContourProcessor:
         small holes or objects.
         """
         # Bitmap based on height
-        terrain = numpy.vectorize(lambda x: lower <= x, otypes="?")(self.base_terrain)
+        if self.fill_terrain:
+            terrain = numpy.vectorize(lambda x: lower <= x, otypes="?")(self.base_terrain)
+        else:
+            terrain = numpy.vectorize(lambda x: lower <= x < upper, otypes="?")(self.base_terrain)
 
         # Fill small holes
         hole_threshold = int(
@@ -249,7 +263,7 @@ class ContourProcessor:
             above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
                 self.detail_image.size
             )
-            image = PIL.Image.composite(self.above_image, image, above_mask_image)
+            image = PIL.Image.composite(self.above_image if self.fill_terrain else self.transparent_image, image, above_mask_image)
         # Draw on contours
         contours = self.convert_and_simplify_contours(
             skimage.measure.find_contours(self.terrains[lower], 0.5),
