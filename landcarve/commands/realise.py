@@ -16,7 +16,10 @@ from landcarve.utils.io import raster_to_array
 @click.option("--xy-scale", default=1.0, help="X/Y scale to use")
 @click.option("--z-scale", default=1.0, help="Z scale to use")
 @click.option("--z-scale-reduction", default=1.0, help="Z scale reduction per 100m")
-@click.option("--minimum", default=0.0, help="Minimum depth (zero point)")
+@click.option("--minimum", default=0.0, type=float, help="Minimum depth (zero point)")
+@click.option(
+    "--maximum", default=9999.0, type=float, help="Maxiumum depth (for flat slices)"
+)
 @click.option("--base", default=1.0, help="Base thickness (in mm)")
 @click.option(
     "--simplify/--no-simplify", default=True, help="Apply simplification to final model"
@@ -32,6 +35,7 @@ def realise(
     z_scale,
     z_scale_reduction,
     minimum,
+    maximum,
     base,
     simplify,
     solid,
@@ -46,6 +50,9 @@ def realise(
         arr = numpy.flipud(arr)
     # Open the target STL file
     mesh = Mesh(scale=(xy_scale, xy_scale, z_scale), z_reduction=z_scale_reduction)
+    # Apply the maximum constraint if there is one
+    if maximum < 9999:
+        arr = numpy.vectorize(lambda x: min(maximum, x), otypes=[object])(arr)
     # Apply the minimum constraint
     if solid:
         arr = numpy.vectorize(
@@ -53,7 +60,7 @@ def realise(
         )(arr)
     else:
         arr = numpy.vectorize(
-            lambda x: max(0, x - minimum) if x > NODATA else None, otypes=[object]
+            lambda x: max(0, x - minimum) if x > minimum else None, otypes=[object]
         )(arr)
     # Work out bounds and print them
     max_value = 0
