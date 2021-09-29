@@ -40,4 +40,5 @@ def downsample_array(arr, max_dimension):
     while (current_steps // downsample_factor) > max_dimension:
         downsample_factor += 1
     # Downsample the array
+    print("Decimate factor: %s" % downsample_factor)
     return arr[::downsample_factor, ::downsample_factor]

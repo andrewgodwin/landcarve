@@ -15,6 +15,7 @@ from landcarve.utils.io import raster_to_array
 @click.argument("output_path")
 @click.option("--xy-scale", default=1.0, help="X/Y scale to use")
 @click.option("--z-scale", default=1.0, help="Z scale to use")
+@click.option("--z-scale-reduction", default=1.0, help="Z scale reduction per 100m")
 @click.option("--minimum", default=0.0, help="Minimum depth (zero point)")
 @click.option("--base", default=1.0, help="Base thickness (in mm)")
 @click.option(
@@ -29,6 +30,7 @@ def realise(
     output_path,
     xy_scale,
     z_scale,
+    z_scale_reduction,
     minimum,
     base,
     simplify,
@@ -43,7 +45,7 @@ def realise(
     if flipy:
         arr = numpy.flipud(arr)
     # Open the target STL file
-    mesh = Mesh(scale=(xy_scale, xy_scale, z_scale))
+    mesh = Mesh(scale=(xy_scale, xy_scale, z_scale), z_reduction=z_scale_reduction)
     # Apply the minimum constraint
     if solid:
         arr = numpy.vectorize(
@@ -165,8 +167,9 @@ class Mesh:
     Represents a mesh of the geography.
     """
 
-    def __init__(self, scale):
+    def __init__(self, scale, z_reduction=1):
         self.scale = scale or (1, 1, 1)
+        self.z_reduction = z_reduction
         # Dict of (x, y, z): index
         self.vertices = collections.OrderedDict()
         # List of (v1, v2, v3, normal)
@@ -177,10 +180,12 @@ class Mesh:
         Returns the vertex's index, adding it if needed
         """
         assert len(vertex) == 3
+        z_units = vertex[2] / 100.0
+        z_scale = self.scale[2] * (self.z_reduction ** z_units)
         vertex = (
             vertex[0] * self.scale[0],
             vertex[1] * self.scale[1],
-            vertex[2] * self.scale[2],
+            vertex[2] * z_scale,
         )
         if vertex not in self.vertices:
             self.vertices[vertex] = len(self.vertices)

@@ -8,16 +8,28 @@ from landcarve.utils.io import array_to_raster, raster_to_array_and_projection
 
 @main.command()
 @click.option(
-    "--x-size", default=1000, type=int, help="Size of new tiles in X dimension",
+    "--x-size",
+    default=1000,
+    type=int,
+    help="Size of new tiles in X dimension",
 )
 @click.option(
-    "--y-size", default=1000, type=int, help="Size of new tiles in Y dimension",
+    "--y-size",
+    default=1000,
+    type=int,
+    help="Size of new tiles in Y dimension",
 )
 @click.option(
-    "--x-offset", default=0, type=int, help="Offset of start point in X",
+    "--x-offset",
+    default=0,
+    type=int,
+    help="Offset of start point in X",
 )
 @click.option(
-    "--y-offset", default=0, type=int, help="Offset of start point in Y",
+    "--y-offset",
+    default=0,
+    type=int,
+    help="Offset of start point in Y",
 )
 @click.argument("input_path")
 @click.argument("output_path")
@@ -30,12 +42,22 @@ def tilesplit(input_path, output_path, x_size, y_size, x_offset, y_offset):
     # Prep output path
     if output_path.endswith(".tif"):
         output_path = output_path[:-4]
+    # Work out Y slice sizes
+    y_slices = [0]
+    while y_slices[-1] + y_size < arr.shape[0]:
+        y_slices.append(y_slices[-1] + y_size)
+    if y_slices[-1] < arr.shape[0]:
+        y_slices.append(arr.shape[0])
+    # Work out X slice sizes
+    x_slices = [0]
+    while x_slices[-1] + x_size < arr.shape[1]:
+        x_slices.append(x_slices[-1] + x_size)
+    if x_slices[-1] < arr.shape[1]:
+        x_slices.append(arr.shape[1])
     # Slice and dice
-    y = y_offset
-    while y + y_size <= arr.shape[0]:
-        x = x_offset
-        while x + x_size <= arr.shape[1]:
-            tile = arr[y : y + y_size, x : x + x_size]
+    for y, y_next in zip(y_slices, y_slices[1:]):
+        for x, x_next in zip(x_slices, x_slices[1:]):
+            tile = arr[y:y_next, x:x_next]
             # Write out the tile
             array_to_raster(
                 tile,
@@ -44,5 +66,3 @@ def tilesplit(input_path, output_path, x_size, y_size, x_offset, y_offset):
                 projection=proj,
             )
             click.echo(f"Wrote tile {x} {y}")
-            x += x_size
-        y += y_size

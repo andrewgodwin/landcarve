@@ -13,6 +13,7 @@ def main():
 import landcarve.commands.bulkget
 import landcarve.commands.contour_image
 import landcarve.commands.decifit
+import landcarve.commands.decimate
 import landcarve.commands.fixnodata
 import landcarve.commands.flipy
 import landcarve.commands.lasdem
