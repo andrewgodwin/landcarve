@@ -63,7 +63,7 @@ def lasdem(
     with click.progressbar(length=len(input_paths), label="Opening files") as bar:
         for input_path in input_paths:
             bar.update(1)
-            las = laspy.file.File(input_path, mode="r")
+            las = laspy.read(input_path)
             las_files.append(las)
             las_projection = "unknown"
             for vlr in las.header.vlrs:
@@ -89,7 +89,7 @@ def lasdem(
     min_x, max_x, min_y, max_y = 1000000000, -1000000000, 1000000000, -1000000000
     num_points = 0
     for las in las_files:
-        num_points += las.points.shape[0]
+        num_points += las.points.array.size
         if ignore_header_range:
             min_x = min(min_x, las.x.min())
             max_x = max(max_x, las.x.max())
@@ -112,7 +112,7 @@ def lasdem(
     click.echo(f"Final DEM size {x_size}x{y_size}")
 
     # Create a new array to hold the data
-    arr = numpy.full((y_size, x_size), NODATA, dtype=numpy.float)
+    arr = numpy.full((y_size, x_size), NODATA, dtype=float)
     ignored_points = 0
 
     # For each point, bucket it into the right array coord

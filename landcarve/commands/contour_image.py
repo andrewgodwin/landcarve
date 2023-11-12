@@ -1,6 +1,6 @@
 import os
 import click
-import gdal
+from osgeo import gdal
 import numpy
 import PIL.Image
 import skimage.measure
