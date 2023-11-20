@@ -1,6 +1,5 @@
 import os
 import click
-import gdal
 import numpy
 import PIL.Image
 import skimage.measure
@@ -10,11 +9,9 @@ import svgwrite
 
 from landcarve.cli import main
 from landcarve.commands.zfit import value_range
-from landcarve.constants import NODATA
-from landcarve.utils.io import array_to_raster, raster_to_array
+from landcarve.utils.io import raster_to_array
 from landcarve.utils.graphics import (
     bitmap_array_to_image,
-    draw_border,
     draw_crosshatch,
     draw_contours,
     draw_labels,
@@ -223,9 +220,13 @@ class ContourProcessor:
         """
         # Bitmap based on height
         if self.fill_terrain:
-            terrain = numpy.vectorize(lambda x: lower <= x, otypes="?")(self.base_terrain)
+            terrain = numpy.vectorize(lambda x: lower <= x, otypes="?")(
+                self.base_terrain
+            )
         else:
-            terrain = numpy.vectorize(lambda x: lower <= x < upper, otypes="?")(self.base_terrain)
+            terrain = numpy.vectorize(lambda x: lower <= x < upper, otypes="?")(
+                self.base_terrain
+            )
 
         # Fill small holes
         hole_threshold = int(
@@ -263,7 +264,11 @@ class ContourProcessor:
             above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
                 self.detail_image.size
             )
-            image = PIL.Image.composite(self.above_image if self.fill_terrain else self.transparent_image, image, above_mask_image)
+            image = PIL.Image.composite(
+                self.above_image if self.fill_terrain else self.transparent_image,
+                image,
+                above_mask_image,
+            )
         # Draw on contours
         contours = self.convert_and_simplify_contours(
             skimage.measure.find_contours(self.terrains[lower], 0.5),

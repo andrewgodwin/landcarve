@@ -19,14 +19,14 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        "gdal~=3.0",
+        "gdal[numpy]~=3.6.0",
         "numpy~=1.16",
         "click~=7.0",
         "svgwrite~=1.4",
         "scikit-image~=0.16",
         "requests~=2.18",
         "simplification~=0.5",
-        "laspy~=1.7.0",
+        "laspy[lazrs]~=2.5.0",
     ],
     entry_points={"console_scripts": ["landcarve = landcarve.cli:main"]},
 )
