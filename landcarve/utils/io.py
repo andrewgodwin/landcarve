@@ -119,3 +119,8 @@ def save_geotiff(image, x1, y1, x2, y2, path, proj="EPSG:4326"):
     )
     # Delete temp file
     os.unlink(temp_path)
+
+
+def save_png(image, path):
+    temp_path = path
+    image.save(path)
