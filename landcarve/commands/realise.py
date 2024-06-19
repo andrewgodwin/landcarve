@@ -82,7 +82,7 @@ def realise(
         if value and value > max_value:
             max_value = value
     print(
-        f"X size: {arr.shape[1]*xy_scale:.2f}  Y size: {arr.shape[0]*xy_scale:.2f}  Z size: {max_value*z_scale:.2f}"
+        f"X size: {(arr.shape[1]-1)*xy_scale:.2f}  Y size: {(arr.shape[0]-1)*xy_scale:.2f}  Z size: {max_value*z_scale:.2f}"
     )
     # For each value in the array, output appropriate polygons
     bottom = 0 - (base / z_scale)

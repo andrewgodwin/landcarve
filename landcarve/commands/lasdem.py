@@ -36,7 +36,9 @@ from landcarve.utils.stats import mean, pstdev, clip
     help="Despeckle factor; higher is stronger. 0 to disable.",
 )
 @click.option(
-    "--ignore-header-range", type=bool, default=False,
+    "--ignore-header-range",
+    type=bool,
+    default=False,
 )
 @click.argument("input_paths", nargs=-1)
 @click.argument("output_path")
@@ -108,6 +110,7 @@ def lasdem(
     y_size = y_index(max_y) + 1
 
     # Print some diagnostic info
+    click.echo(f"Snap divisor: {snap}")
     click.echo(f"X range: {min_x} - {max_x}  Y range: {min_y} - {max_y}")
     click.echo(f"Final DEM size {x_size}x{y_size}")
 
