@@ -1,9 +1,11 @@
+from asyncio import base_events
 import collections
 
 import click
 import numpy
 import struct
-import time
+import trimesh.base
+import trimesh.creation
 
 from landcarve.cli import main
 from landcarve.constants import NODATA
@@ -16,9 +18,17 @@ from landcarve.utils.io import raster_to_array
 @click.option("--xy-scale", default=1.0, help="X/Y scale to use")
 @click.option("--z-scale", default=1.0, help="Z scale to use")
 @click.option("--z-scale-reduction", default=1.0, help="Z scale reduction per 100m")
-@click.option("--minimum", default=0.0, type=float, help="Minimum depth (zero point)")
 @click.option(
-    "--maximum", default=9999.0, type=float, help="Maxiumum depth (for flat slices)"
+    "--minimum",
+    default=0.0,
+    type=float,
+    help="Minimum depth (zero point) in elevation units",
+)
+@click.option(
+    "--maximum",
+    default=9999.0,
+    type=float,
+    help="Maxiumum depth (for flat slices) in elevation units",
 )
 @click.option("--base", default=1.0, help="Base thickness (in mm)")
 @click.option(
@@ -26,6 +36,9 @@ from landcarve.utils.io import raster_to_array
 )
 @click.option("--solid/--not-solid", default=False, help="Force a solid, square base")
 @click.option("--flipy/--no-flipy", default=False, help="Flip model Y axis")
+@click.option(
+    "--slices", default="", help="Slice points (in elevation units) for multiple STLs"
+)
 @click.pass_context
 def realise(
     ctx,
@@ -40,6 +53,7 @@ def realise(
     simplify,
     solid,
     flipy,
+    slices,
 ):
     """
     Turns a DEM array into a 3D model.
@@ -148,9 +162,27 @@ def realise(
                 break
             total_removed += removed
         click.echo("] %i vertices removed" % total_removed)
+    tmesh = mesh.to_trimesh()
+    # Slice
+    if slices:
+        click.echo("Slicing mesh  [", err=True, nl=False)
+        bounds = [
+            [tmesh.bounds[0][0] - 1, tmesh.bounds[0][2] - 1, -1],
+            [tmesh.bounds[1][0] + 1, tmesh.bounds[1][1] + 1, -1],
+        ]
+        slices = [float(val.strip()) for val in slices.strip().split(",")] + [9999]
+        for slice in slices:
+            click.echo(f"{slice} ", nl=False)
+            # Create a box to slice by
+            bounds[0][2] = bounds[1][2]
+            bounds[1][2] = (slice - minimum) * z_scale
+            box = trimesh.creation.box(bounds=bounds)
+            slice_mesh = trimesh.boolean.intersection([tmesh, box])
+            slice_mesh.export(output_path.replace(".stl", f".{slice}.stl"))
+        click.echo("]")
     # All done!
     click.echo("Writing STL...", err=True)
-    mesh.save(output_path)
+    tmesh.export(output_path)
 
 
 def get_neighbour_value(index, arr):
@@ -180,7 +212,7 @@ class Mesh:
         # Dict of (x, y, z): index
         self.vertices = collections.OrderedDict()
         # List of (v1, v2, v3, normal)
-        self.faces = []
+        self.faces: list[tuple[tuple[float, float, float], float, float, float]] = []
 
     def vertex_index(self, vertex):
         """
@@ -188,7 +220,7 @@ class Mesh:
         """
         assert len(vertex) == 3
         z_units = vertex[2] / 100.0
-        z_scale = self.scale[2] * (self.z_reduction ** z_units)
+        z_scale = self.scale[2] * (self.z_reduction**z_units)
         vertex = (
             vertex[0] * self.scale[0],
             vertex[1] * self.scale[1],
@@ -260,6 +292,19 @@ class Mesh:
             (point2[0], point2[1], bottom),
             (point1[0], point1[1], bottom),
         )
+
+    def to_trimesh(self):
+        """
+        Returns a PyMesh representation of us
+        """
+        # Sort vertices by their index
+        vertices_by_index = [(i, v) for v, i in self.vertices.items()]
+        vertices_by_index.sort()
+        vertices = numpy.array([v for i, v in vertices_by_index])
+        # Extract faces into triples
+        faces = numpy.array([[v1, v2, v3] for n, v1, v2, v3 in self.faces])
+
+        return trimesh.base.Trimesh(vertices, faces)
 
     def simplify(self):
         """

@@ -27,6 +27,8 @@ setup(
         "requests~=2.18",
         "simplification~=0.5",
         "laspy[lazrs]~=2.5.0",
+        "trimesh~=4.4.1",
+        "manifold3d~=2.5.1",
     ],
     entry_points={"console_scripts": ["landcarve = landcarve.cli:main"]},
 )
