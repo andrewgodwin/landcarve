@@ -31,9 +31,14 @@ from landcarve.utils.io import array_to_raster, raster_to_array_and_projection
     type=int,
     help="Offset of start point in Y",
 )
+@click.option(
+    "--naming-scheme", default="offset", type=str, help="One of offset or letter"
+)
 @click.argument("input_path")
 @click.argument("output_path")
-def tilesplit(input_path, output_path, x_size, y_size, x_offset, y_offset):
+def tilesplit(
+    input_path, output_path, x_size, y_size, x_offset, y_offset, naming_scheme
+):
     """
     Splits a single big DEM into smaller ones
     """
@@ -55,13 +60,18 @@ def tilesplit(input_path, output_path, x_size, y_size, x_offset, y_offset):
     if x_slices[-1] < arr.shape[1]:
         x_slices.append(arr.shape[1])
     # Slice and dice
-    for y, y_next in zip(y_slices, y_slices[1:]):
-        for x, x_next in zip(x_slices, x_slices[1:]):
+    for j, (y, y_next) in enumerate(zip(y_slices, y_slices[1:])):
+        for i, (x, x_next) in enumerate(zip(x_slices, x_slices[1:])):
             tile = arr[y:y_next, x:x_next]
             # Write out the tile
+            if naming_scheme == "letter":
+                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                suffix = f"{letters[i]}{j+1}"
+            else:
+                suffix = f"{x}_{y}"
             array_to_raster(
                 tile,
-                f"{output_path}_{x}_{y}.tif",
+                f"{output_path}_{suffix}.tif",
                 offset_and_pixel=(x, y, 1, 1),
                 projection=proj,
             )
