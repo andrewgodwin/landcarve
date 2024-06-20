@@ -37,6 +37,11 @@ from landcarve.utils.io import raster_to_array
 @click.option("--solid/--not-solid", default=False, help="Force a solid, square base")
 @click.option("--flipy/--no-flipy", default=False, help="Flip model Y axis")
 @click.option(
+    "--thin/--not-thin",
+    default=False,
+    help="No solid base, just a thin surface of thickness 'base'",
+)
+@click.option(
     "--slices", default="", help="Slice points (in elevation units) for multiple STLs"
 )
 @click.pass_context
@@ -52,6 +57,7 @@ def realise(
     base,
     simplify,
     solid,
+    thin,
     flipy,
     slices,
 ):
@@ -105,6 +111,8 @@ def realise(
                 bl = get_neighbour_value((index[0] - 1, index[1] + 1), arr)
                 b = get_neighbour_value((index[0], index[1] + 1), arr)
                 br = get_neighbour_value((index[0] + 1, index[1] + 1), arr)
+                if thin:
+                    bottom = value - (base / z_scale)
                 # Centre-Right-Bottom triangle
                 if r[2] is not None and b[2] is not None:
                     mesh.add_surface(c, r, b, bottom)
