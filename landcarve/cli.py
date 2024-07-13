@@ -14,6 +14,7 @@ import landcarve.commands.bulkget
 import landcarve.commands.contour_image
 import landcarve.commands.decifit
 import landcarve.commands.decimate
+import landcarve.commands.elevalue
 import landcarve.commands.exactfit
 import landcarve.commands.fixnodata
 import landcarve.commands.flipy

@@ -99,9 +99,9 @@ def realise(
             if value is not None:
                 # Work out the neighbour values
                 # Arranged like so:
-                #       t   tr
+                #   tl  t   tr
                 #   l   c---r
-                #       b
+                #   bl  b   br
                 c = (index[0], index[1], value)
                 t = get_neighbour_value((index[0], index[1] - 1), arr)
                 tr = get_neighbour_value((index[0] + 1, index[1] - 1), arr)
@@ -112,53 +112,53 @@ def realise(
                 b = get_neighbour_value((index[0], index[1] + 1), arr)
                 br = get_neighbour_value((index[0] + 1, index[1] + 1), arr)
                 if thin:
-                    bottom = value - (base / z_scale)
+                    bottom = base / z_scale
                 # Centre-Right-Bottom triangle
                 if r[2] is not None and b[2] is not None:
-                    mesh.add_surface(c, r, b, bottom)
+                    mesh.add_surface(c, r, b, bottom, thin=thin)
                     # Add diagonal edge if BR is nonexistent
                     if br[2] is None:
-                        mesh.add_edge(b, r, bottom)
+                        mesh.add_edge(b, r, bottom, thin=thin)
                     # Top edge
                     if t[2] is None and tr[2] is None:
-                        mesh.add_edge(r, c, bottom)
+                        mesh.add_edge(r, c, bottom, thin=thin)
                     # Left edge
                     if l[2] is None and bl[2] is None:
-                        mesh.add_edge(c, b, bottom)
+                        mesh.add_edge(c, b, bottom, thin=thin)
                 # Top-centre-left triangle
                 if t[2] is not None and l[2] is not None:
-                    mesh.add_surface(t, c, l, bottom)
+                    mesh.add_surface(t, c, l, bottom, thin=thin)
                     # Add diagonal edge if TL is nonexistent
                     if tl[2] is None:
-                        mesh.add_edge(t, l, bottom)
+                        mesh.add_edge(t, l, bottom, thin=thin)
                     # Right edge
                     if r[2] is None and tr[2] is None:
-                        mesh.add_edge(c, t, bottom)
+                        mesh.add_edge(c, t, bottom, thin=thin)
                     # Bottom edge
                     if b[2] is None and bl[2] is None:
-                        mesh.add_edge(l, c, bottom)
+                        mesh.add_edge(l, c, bottom, thin=thin)
                 # Top-right-center triangle (if tr doesn't exist)
                 if t[2] is not None and r[2] is not None and tr[2] is None:
-                    mesh.add_surface(t, r, c, bottom)
+                    mesh.add_surface(t, r, c, bottom, thin=thin)
                     # Also implies there must be an edge there
-                    mesh.add_edge(r, t, bottom)
+                    mesh.add_edge(r, t, bottom, thin=thin)
                     # See if it needs a left edge
                     if l[2] is None and tl[2] is None:
-                        mesh.add_edge(t, c, bottom)
+                        mesh.add_edge(t, c, bottom, thin=thin)
                     # Bottom edge
                     if b[2] is None and br[2] is None:
-                        mesh.add_edge(c, r, bottom)
+                        mesh.add_edge(c, r, bottom, thin=thin)
                 # Left-center-bottom triangle (if bl doesn't exist)
                 if l[2] is not None and b[2] is not None and bl[2] is None:
-                    mesh.add_surface(l, c, b, bottom)
+                    mesh.add_surface(l, c, b, bottom, thin=thin)
                     # Also implies there must be an edge there
-                    mesh.add_edge(l, b, bottom)
+                    mesh.add_edge(l, b, bottom, thin=thin)
                     # See if it needs a right edge
                     if r[2] is None and br[2] is None:
-                        mesh.add_edge(b, c, bottom)
+                        mesh.add_edge(b, c, bottom, thin=thin)
                     # And a top edge
                     if t[2] is None and tr[2] is None:
-                        mesh.add_edge(c, l, bottom)
+                        mesh.add_edge(c, l, bottom, thin=thin)
     # Simplify
     if simplify:
         click.echo("Simplifying mesh  [", err=True, nl=False)
@@ -273,7 +273,7 @@ class Mesh:
         self.add_triangle(point1, point2, point4)
         self.add_triangle(point2, point3, point4)
 
-    def add_surface(self, point1, point2, point3, bottom):
+    def add_surface(self, point1, point2, point3, bottom, thin=False):
         """
         Adds a facet with a matching flat bottom polygon.
         Points should be clockwise looking from the top.
@@ -283,23 +283,38 @@ class Mesh:
             (point2[0], point2[1], point2[2]),
             (point3[0], point3[1], point3[2]),
         )
-        self.add_triangle(
-            (point1[0], point1[1], bottom),
-            (point3[0], point3[1], bottom),
-            (point2[0], point2[1], bottom),
-        )
+        if thin:
+            self.add_triangle(
+                (point1[0], point1[1], point1[2] - bottom),
+                (point3[0], point3[1], point3[2] - bottom),
+                (point2[0], point2[1], point2[2] - bottom),
+            )
+        else:
+            self.add_triangle(
+                (point1[0], point1[1], bottom),
+                (point2[0], point2[1], bottom),
+                (point3[0], point3[1], bottom),
+            )
 
-    def add_edge(self, point1, point2, bottom):
+    def add_edge(self, point1, point2, bottom, thin=False):
         """
         Adds a quad to form an edge between the two vertices.
         Vertices should be left, right looking from the outside of the model.
         """
-        self.add_quad(
-            (point1[0], point1[1], point1[2]),
-            (point2[0], point2[1], point2[2]),
-            (point2[0], point2[1], bottom),
-            (point1[0], point1[1], bottom),
-        )
+        if thin:
+            self.add_quad(
+                (point1[0], point1[1], point1[2]),
+                (point2[0], point2[1], point2[2]),
+                (point2[0], point2[1], point2[2] - bottom),
+                (point1[0], point1[1], point1[2] - bottom),
+            )
+        else:
+            self.add_quad(
+                (point1[0], point1[1], point1[2]),
+                (point2[0], point2[1], point2[2]),
+                (point2[0], point2[1], bottom),
+                (point1[0], point1[1], bottom),
+            )
 
     def to_trimesh(self):
         """
