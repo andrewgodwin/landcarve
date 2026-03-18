@@ -60,6 +60,11 @@ from landcarve.utils.graphics import (
     default=False,
     help="Leave holes inside of terrain to save on material",
 )
+@click.option(
+    "--construction-only/--with-pieces",
+    default=False,
+    help="Only output construction images, and don't include lower layers in them",
+)
 @click.argument("input_path")
 @click.argument("output_path")
 @click.argument("image_path")
@@ -76,6 +81,7 @@ def contour_image(
     line_scale,
     page_size,
     rigid,
+    construction_only,
 ):
     """
     Slices a terrain into contour segments and then outputs an image and a cut
@@ -92,7 +98,7 @@ def contour_image(
 
     # Check output path
     if not os.path.isdir(output_path):
-        click.error("Output path must be a directory")
+        click.echo(f"Output path {output_path} must be a directory")
         return 1
 
     # Check contour list
@@ -129,6 +135,7 @@ def contour_image(
             "contour_simplification": simp,
             "line_scale": line_scale,
             "fill_terrain": not rigid,
+            "construction_only": construction_only,
         },
     )
     processor.cut_contours(contour_list, output_path, page_size=page_size)
@@ -152,6 +159,7 @@ class ContourProcessor:
         self.minimum_object = float(options.get("minimum_object", 0.05))
         self.line_scale = int(options.get("line_scale", 2))
         self.fill_terrain = options.get("fill_terrain", True)
+        self.construction_only = options.get("construction_only", False)
 
         # Generate the fill images for "land above"
         self.transparent_image = PIL.Image.new(
@@ -181,6 +189,9 @@ class ContourProcessor:
             construction_image.save(
                 os.path.join(output_path, "contour_%s_construction.png" % lower)
             )
+
+        if self.construction_only:
+            return
 
         # For each terrain, calculate each possible component and generate
         # image snippets
@@ -236,10 +247,10 @@ class ContourProcessor:
             terrain.shape[0] * terrain.shape[1] * 0.01 * self.minimum_object
         )
         terrain = skimage.morphology.remove_small_holes(
-            terrain, area_threshold=hole_threshold, in_place=True
+            terrain, max_size=hole_threshold
         )
         terrain = skimage.morphology.remove_small_objects(
-            terrain, min_size=object_threshold, in_place=True
+            terrain, max_size=object_threshold
         )
         return terrain
 
@@ -254,9 +265,13 @@ class ContourProcessor:
         )
         # Create a semi-transparent base image
         image = PIL.Image.new(
-            "RGBA", self.detail_image.size, color=(255, 255, 255, 255)
+            "RGBA",
+            self.detail_image.size,
+            color=(255, 255, 255, 0 if self.construction_only else 255),
         )
-        image = PIL.Image.blend(image, self.detail_image, 0.5)
+        image = PIL.Image.blend(
+            image, self.detail_image, 0 if self.construction_only else 0.5
+        )
         # Layer on the detail
         image = PIL.Image.composite(self.detail_image, image, mask_image)
         # Make an image pattern to represent "terrain above" and mask it in if needed
@@ -264,18 +279,25 @@ class ContourProcessor:
             above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
                 self.detail_image.size
             )
-            image = PIL.Image.composite(
-                self.above_image if self.fill_terrain else self.transparent_image,
-                image,
-                above_mask_image,
-            )
+            if self.construction_only:
+                if not self.fill_terrain:
+                    alpha = image.getchannel("A")
+                    alpha.paste(0, mask=above_mask_image)
+                    image.putalpha(alpha)
+            else:
+                image = PIL.Image.composite(
+                    self.above_image if self.fill_terrain else self.transparent_image,
+                    image,
+                    above_mask_image,
+                )
         # Draw on contours
-        contours = self.convert_and_simplify_contours(
-            skimage.measure.find_contours(self.terrains[lower], 0.5),
-            x_scale=image.size[0] / self.base_terrain.shape[1],
-            y_scale=image.size[1] / self.base_terrain.shape[0],
-        )
-        draw_contours(image, contours, width=self.line_scale)
+        if not self.construction_only:
+            contours = self.convert_and_simplify_contours(
+                skimage.measure.find_contours(self.terrains[lower], 0.5),
+                x_scale=image.size[0] / self.base_terrain.shape[1],
+                y_scale=image.size[1] / self.base_terrain.shape[0],
+            )
+            draw_contours(image, contours, width=self.line_scale)
         return image
 
     def make_terrain_pieces(self, lower, upper):
@@ -294,7 +316,7 @@ class ContourProcessor:
             above_mask_image = bitmap_array_to_image(
                 skimage.morphology.erosion(
                     self.terrains[upper],
-                    selem=skimage.morphology.square((self.bleed * 2) + 1),
+                    footprint=skimage.morphology.square((self.bleed * 2) + 1),
                 )
             ).resize(full_image.size)
             full_image = PIL.Image.composite(
@@ -312,7 +334,7 @@ class ContourProcessor:
                     piece_mask[y, x] = 0
             # Bleed the mask out a bit to make a print mask
             bleed_mask = skimage.morphology.dilation(
-                piece_mask, selem=skimage.morphology.square((self.bleed * 2) + 1)
+                piece_mask, footprint=skimage.morphology.square((self.bleed * 2) + 1)
             )
             # Resize both masks up into images
             piece_mask_image = bitmap_array_to_image(piece_mask).resize(full_image.size)
