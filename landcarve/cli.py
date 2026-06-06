@@ -12,6 +12,7 @@ def main():
 # Import all sub-commands
 import landcarve.commands.bulkget
 import landcarve.commands.contour_image
+import landcarve.commands.contour_svg
 import landcarve.commands.decifit
 import landcarve.commands.decimate
 import landcarve.commands.elevalue

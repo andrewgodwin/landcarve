@@ -276,9 +276,12 @@ class ContourProcessor:
         image = PIL.Image.composite(self.detail_image, image, mask_image)
         # Make an image pattern to represent "terrain above" and mask it in if needed
         if upper in self.terrains:
-            above_mask_image = bitmap_array_to_image(self.terrains[upper]).resize(
-                self.detail_image.size
-            )
+            above_mask_image = bitmap_array_to_image(
+                skimage.morphology.erosion(
+                    self.terrains[upper],
+                    footprint=skimage.morphology.square((self.bleed * 2) + 1),
+                )
+            ).resize(self.detail_image.size)
             if self.construction_only:
                 if not self.fill_terrain:
                     alpha = image.getchannel("A")
