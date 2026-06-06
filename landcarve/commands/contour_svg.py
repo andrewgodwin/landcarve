@@ -1,8 +1,8 @@
 import click
 import numpy
+import simplification.cutil
 import skimage.measure
 import skimage.morphology
-import simplification.cutil
 import svgwrite
 
 from landcarve.cli import main
@@ -24,13 +24,13 @@ from landcarve.utils.io import raster_to_array
 )
 @click.option(
     "--min-object",
-    default=1.0,
+    default=0.5,
     type=float,
     help="Remove above-level regions smaller than this percentage of total pixels",
 )
 @click.option(
     "--min-hole",
-    default=1.0,
+    default=0.5,
     type=float,
     help="Fill holes in above-level regions smaller than this percentage of total pixels",
 )
@@ -92,8 +92,15 @@ def contour_svg(
     mask = skimage.morphology.remove_small_objects(
         mask, min_size=int(total_pixels * min_object / 100)
     )
-    padded = numpy.pad(mask.astype(numpy.float64), 1, mode="constant", constant_values=0.0)
-    raw_contours = skimage.measure.find_contours(padded, 0.5)
+
+    # Apply the cleaned mask back to the float array so removed regions are
+    # definitively below the level, then pad with the same sentinel value.
+    # Running find_contours on the float array (rather than the binary mask)
+    # gives sub-pixel interpolated positions — no pixel-boundary staircase.
+    pad_value = height - 1
+    cleaned = numpy.where(mask, arr, pad_value)
+    padded = numpy.pad(cleaned, 1, mode="constant", constant_values=pad_value)
+    raw_contours = skimage.measure.find_contours(padded, height)
     click.echo(f"Found {len(raw_contours)} contour(s) at height {height}")
 
     contours = []
@@ -108,7 +115,9 @@ def contour_svg(
             contour = contour[:-1]
 
         if simp > 0:
-            contour = numpy.array(simplification.cutil.simplify_coords_vw(contour, simp))
+            contour = numpy.array(
+                simplification.cutil.simplify_coords_vw(contour, simp)
+            )
 
         if len(contour) >= min_points:
             contours.append(contour)
@@ -140,8 +149,12 @@ _EDGE_TOL = 0.01
 def _on_image_edge(points, w, h):
     """Returns a boolean array: True where a point lies on the image boundary."""
     x, y = points[:, 0], points[:, 1]
-    return (x < _EDGE_TOL) | (x > w - 1 - _EDGE_TOL) | \
-           (y < _EDGE_TOL) | (y > h - 1 - _EDGE_TOL)
+    return (
+        (x < _EDGE_TOL)
+        | (x > w - 1 - _EDGE_TOL)
+        | (y < _EDGE_TOL)
+        | (y > h - 1 - _EDGE_TOL)
+    )
 
 
 def _catmull_rom_path(points, on_edge, tension=1.0):
@@ -165,8 +178,8 @@ def _catmull_rom_path(points, on_edge, tension=1.0):
 
     for i in range(n):
         p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
-        b1 = bnd[i + 1]   # is the source (p1) on the edge?
-        b2 = bnd[i + 2]   # is the destination (p2) on the edge?
+        b1 = bnd[i + 1]  # is the source (p1) on the edge?
+        b2 = bnd[i + 2]  # is the destination (p2) on the edge?
 
         if b1 or b2:
             path += f" L {p2[0]:.3f},{p2[1]:.3f}"
@@ -174,7 +187,7 @@ def _catmull_rom_path(points, on_edge, tension=1.0):
             # Suppress the tangent contribution from any boundary neighbour so
             # the curve departs cleanly from the edge instead of being pulled
             # back along it.
-            p_eff0 = p1 if bnd[i]     else p0
+            p_eff0 = p1 if bnd[i] else p0
             p_eff3 = p2 if bnd[i + 3] else p3
             cp1 = p1 + (p2 - p_eff0) * tension / 6.0
             cp2 = p2 - (p_eff3 - p1) * tension / 6.0
