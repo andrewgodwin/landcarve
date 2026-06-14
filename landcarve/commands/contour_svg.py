@@ -1,5 +1,6 @@
 import click
 import numpy
+import scipy.ndimage
 import simplification.cutil
 import skimage.measure
 import skimage.morphology
@@ -12,25 +13,32 @@ from landcarve.utils.io import raster_to_array
 @main.command()
 @click.option(
     "--simp",
-    default=0.5,
+    default=0.2,
     type=float,
     help="Visvalingam-Whyatt simplification coefficient (0 to skip)",
 )
 @click.option(
+    "--smooth",
+    default=0.0,
+    type=float,
+    help="Gaussian smoothing sigma in pixels applied along each contour to "
+    "remove the pixel-grid staircase (0 to skip)",
+)
+@click.option(
     "--tension",
-    default=1.0,
+    default=3.0,
     type=float,
     help="Catmull-Rom tension for smoothing (higher = tighter curves)",
 )
 @click.option(
     "--min-object",
-    default=0.5,
+    default=0.2,
     type=float,
     help="Remove above-level regions smaller than this percentage of total pixels",
 )
 @click.option(
     "--min-hole",
-    default=0.5,
+    default=0.1,
     type=float,
     help="Fill holes in above-level regions smaller than this percentage of total pixels",
 )
@@ -52,6 +60,12 @@ from landcarve.utils.io import raster_to_array
     type=str,
     help="SVG stroke color",
 )
+@click.option(
+    "--fill-color",
+    default="none",
+    type=str,
+    help="SVG fill color",
+)
 @click.argument("input_path")
 @click.argument("output_path")
 @click.argument("height", type=float)
@@ -60,12 +74,14 @@ def contour_svg(
     output_path,
     height,
     simp,
+    smooth,
     tension,
     min_object,
     min_hole,
     min_points,
     stroke_width,
     stroke_color,
+    fill_color,
 ):
     """
     Extracts a single contour line at a given HEIGHT from a geo raster image
@@ -87,7 +103,7 @@ def contour_svg(
     total_pixels = h * w
     mask = arr >= height
     mask = skimage.morphology.remove_small_holes(
-        mask, area_threshold=int(total_pixels * min_hole / 100)
+        mask, max_size=int(total_pixels * min_hole / 100)
     )
     mask = skimage.morphology.remove_small_objects(
         mask, min_size=int(total_pixels * min_object / 100)
@@ -114,6 +130,13 @@ def contour_svg(
         if len(contour) > 1 and numpy.linalg.norm(contour[0] - contour[-1]) < 0.01:
             contour = contour[:-1]
 
+        # Low-pass the (still dense) contour to wash out the pixel-grid
+        # staircase before simplification picks vertices. Boundary points are
+        # held fixed so contours closed along the image edge stay sharp.
+        if smooth > 0:
+            on_edge = _on_image_edge(contour[:, [1, 0]], w, h)
+            contour = _smooth_contour(contour, on_edge, smooth)
+
         if simp > 0:
             contour = numpy.array(
                 simplification.cutil.simplify_coords_vw(contour, simp)
@@ -134,7 +157,7 @@ def contour_svg(
             drawing.path(
                 d=path_d,
                 stroke=stroke_color,
-                fill="none",
+                fill=fill_color,
                 stroke_width=stroke_width,
             )
         )
@@ -144,6 +167,58 @@ def contour_svg(
 
 
 _EDGE_TOL = 0.01
+
+
+def _smooth_contour(contour, on_edge, sigma):
+    """
+    Gaussian-smooths a closed contour's coordinates to remove the pixel-grid
+    staircase, returning a new array of the same length.
+
+    Fully interior contours are smoothed as a periodic loop (mode="wrap").
+    Contours that touch the image boundary are smoothed run-by-run between the
+    boundary points, which are kept exactly in place; each run uses its
+    bracketing boundary point(s) as fixed context so the smoothed curve stays
+    continuous with the straight edge segments.
+    """
+    n = len(contour)
+    if n < 3:
+        return contour
+
+    if not on_edge.any():
+        out = contour.copy()
+        out[:, 0] = scipy.ndimage.gaussian_filter1d(contour[:, 0], sigma, mode="wrap")
+        out[:, 1] = scipy.ndimage.gaussian_filter1d(contour[:, 1], sigma, mode="wrap")
+        return out
+
+    # Rotate so the sequence starts on a boundary point; this prevents an
+    # interior run from being split across the array's wrap-around seam.
+    shift = int(numpy.argmax(on_edge))
+    rolled = numpy.roll(contour, -shift, axis=0)
+    rolled_edge = numpy.roll(on_edge, -shift)
+
+    out = rolled.copy()
+    i = 0
+    while i < n:
+        if rolled_edge[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and not rolled_edge[j]:
+            j += 1
+        # Interior run [i, j); include the bracketing boundary anchors (which
+        # always exist here, since the run is delimited by edge points) so the
+        # smoothing near the run's ends is pulled toward the boundary. The
+        # trailing anchor wraps to index 0 when the run reaches the array end.
+        right = j if j < n else 0
+        seg_idx = [i - 1] + list(range(i, j)) + [right]
+        seg = rolled[seg_idx]
+        sm = seg.copy()
+        sm[:, 0] = scipy.ndimage.gaussian_filter1d(seg[:, 0], sigma, mode="nearest")
+        sm[:, 1] = scipy.ndimage.gaussian_filter1d(seg[:, 1], sigma, mode="nearest")
+        out[i:j] = sm[1:-1]  # write back the interior only; anchors stay fixed
+        i = j
+
+    return numpy.roll(out, shift, axis=0)
 
 
 def _on_image_edge(points, w, h):

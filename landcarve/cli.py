@@ -20,8 +20,10 @@ import landcarve.commands.exactfit
 import landcarve.commands.fixnodata
 import landcarve.commands.flipy
 import landcarve.commands.lasdem
+import landcarve.commands.layer_3mf
 import landcarve.commands.pipeline
 import landcarve.commands.merge
+import landcarve.commands.pack_svg
 import landcarve.commands.realise
 import landcarve.commands.smooth
 import landcarve.commands.stats
