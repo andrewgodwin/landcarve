@@ -83,116 +83,250 @@ Always use ``decifit`` as the first element in a pipeline, and try to keep
 under 1000 in each dimension; 500 tends to be a good tradeoff.
 
 
+
+
 Commands
 --------
+
+Commands are listed alphabetically. Run ``landcarve <command> --help`` for the
+full option list. Most commands take an input path and an output path.
 
 
 bulkget
 ~~~~~~~
 
-Takes a text file containing a list of URLs and downloads only the "interesting"
-ones to a local folder. Designed for use with the USGS National Map download
-feature.
+Downloads only the "interesting" URLs from a text file list. Designed for use
+with the USGS National Map downloader.
+
+
+contour-image
+~~~~~~~~~~~~~
+
+Slices terrain into contour layers and outputs a print image and cut line per
+layer, laid out onto printable pages. Must be the last step in a pipeline.
+
+Options:
+    * ``--min-object``: Ignore objects smaller than this (percent). Default: 0.05
+    * ``--min-hole``: Fill holes smaller than this (percent). Default: 0.02
+    * ``--simp``: Contour simplification coefficient. Default: 0.5
+    * ``--bleed``: Pixels to bleed over the image for cutting. Default: 3
+    * ``--line-scale``: Scale for graphical elements. Default: 2
+    * ``--page-size``: Output page size in pixels. Default: input size
+    * ``--rigid/--non-rigid``: Leave holes inside terrain to save material. Default: ``--non-rigid``
+    * ``--construction-only/--with-pieces``: Only output construction images. Default: ``--with-pieces``
+
+
+contour-svg
+~~~~~~~~~~~
+
+Extracts a single contour line at a given height from a raster and outputs it as
+a smoothed SVG path.
+
+Options:
+    * ``--simp``: Simplification coefficient (0 to skip). Default: 0.2
+    * ``--smooth``: Gaussian smoothing sigma in pixels (0 to skip). Default: 0.0
+    * ``--tension``: Catmull-Rom tension for smoothing. Default: 3.0
+    * ``--min-object``: Remove regions smaller than this (percent). Default: 0.2
+    * ``--min-hole``: Fill holes smaller than this (percent). Default: 0.1
+    * ``--min-points``: Minimum points a contour must have. Default: 4
+    * ``--stroke-width``: SVG stroke width. Default: 1.0
+    * ``--stroke-color``: SVG stroke colour. Default: black
+    * ``--fill-color``: SVG fill colour. Default: none
 
 
 decifit
 ~~~~~~~
 
+Scales a raster down to fit within a number of cells in X/Y, preserving aspect
+ratio. Does not touch Z/values.
+
 Options:
-    * ``--xy-steps``: Size to fit the raster within. Default: 1000
+    * ``-x``: Maximum number of steps on X and Y. Default: 1000
 
-Takes an input raster and fits it within certain limits of X and Y,
-so there's at most ``--xy-steps`` rows and columns. Does not touch Z/values.
 
-It will *preserve aspect ratios* - non-square inputs are scaled to the size of
-their longest edge.
+decimate
+~~~~~~~~
+
+Scales a raster down by an integer divisor, preserving aspect ratio.
+
+Options:
+    * ``-d``: Divisor on the number of steps. Default: 2
+
+
+elevalue
+~~~~~~~~
+
+Outputs elevation values only where a second discrete-valued raster (e.g.
+landcover) falls within a range. Useful for masking water or land types.
+
+Options:
+    * ``-m``: Minimum discrete value to preserve (inclusive).
+    * ``-x``: Maximum discrete value to preserve (inclusive).
+
+
+exactfit
+~~~~~~~~
+
+Scales a raster to an exact number of cells in X and Y (aspect ratio not
+preserved).
+
+Options:
+    * ``-x``: Exact number of steps on X. Default: 1000
+    * ``-y``: Exact number of steps on Y. Default: 1000
 
 
 fixnodata
 ~~~~~~~~~
 
+Pins NODATA values to the internal value of -1000. Use as a pipeline step when
+source data uses a different NODATA boundary.
+
 Options:
     * ``--nodata``: NODATA boundary for input data. Default: 0
 
-All the rest of the tools in the suite assume a NODATA value of -1000. If you
-have source data that is not aligned, use this pipeline step to set anything
-equal or lower to the value of ``--nodata`` you pass to the internal NODATA
-value.
+
+flipy
+~~~~~
+
+Flips the raster vertically (swaps up and down).
 
 
 lasdem
 ~~~~~~
 
-Options:
-    * ``--snap``: Quantization factor in projection units (XY symmetrical). Default: 1
-    * ``--void-distance``: How far to search for void-filling neighbours. Default: 10
+Turns one or more LAS/LAZ point cloud files into a GeoTIFF DEM, thinning by
+highest return and filling voids.
 
-Takes one or more LAS (or LAZ) files, thins them (by highest return elevation),
-and turns them into a GeoTIFF DEM.
+Options:
+    * ``--snap`` (``-s``): Snap/thinning resolution. Default: 1
+    * ``--void-distance`` (``-d``): Max distance to fill voids from. Default: 10
+    * ``--z-limit`` (``-z``): Maximum elevation to trust. Default: 4000
+    * ``--despeckle``: Despeckle strength (0 to disable). Default: 1
+    * ``--ignore-header-range``: Ignore the header's stated value range. Default: off
+
+
+layer-3mf
+~~~~~~~~~
+
+Stacks several contour SVGs into a single 3MF file, one extruded coloured layer
+per SVG, aligned and scaled together.
+
+Options:
+    * ``--layer``: An SVG file and its colour; repeat once per layer (bottom first).
+    * ``--extrude``: Height each layer is extruded by, in mm. Default: 1.0
+    * ``--width``: Target model width in mm. Default: 150.0
+    * ``--curve-steps``: Segments used to flatten Bezier curves. Default: 12
+
+
+merge
+~~~~~
+
+Merges several DEMs together into one.
+
+
+pack-svg
+~~~~~~~~
+
+Packs several contour SVGs into a single sheet, nesting the pieces as tightly as
+possible. Original path data is preserved; only a transform is applied.
+
+Options:
+    * ``--resolution``: Mask pixels per SVG unit for packing. Default: 1.0
+    * ``--margin``: Minimum gap between pieces, in SVG units. Default: 2.0
+    * ``--rotations``: Discrete rotations to try per piece. Default: 4
+    * ``--width``: Output sheet width (0 = approx square). Default: 0.0
+    * ``--curve-steps``: Segments used to flatten Bezier curves. Default: 12
+
+
+pipeline
+~~~~~~~~
+
+Runs a series of commands from a pipeline file, passing files between steps.
+
+Options:
+    * ``--extension``: Output file extension. Default: .stl
 
 
 realise
 ~~~~~~~
 
+Turns a DEM heightmap into a 3D STL model. By default one grid cell maps to one
+output unit.
+
 Options:
-    * ``--xy-scale``: Scale factor for STL model in x/y axes. Default: 1
-    * ``--z-scale``: Scale factor for STL model in z axis. Default: 1
-    * ``--minimum``: Level to cut off detail and assume as base of model. Default: 0
-    * ``--base``: Thickness of the base below the bottom of the model. Default: 1
-    * ``--simplify/--no-simplify``: If simplification should be run. Default: ``--simplify``
-    * ``--solid/--not-solid``: If the model should be forced to a square tile with no holes. Default: ``--not-solid``
-
-The ``realise`` step takes a heightmap and renders it out as an STL file.
-
-By default, the STL will have a dimension matching that of the input grid in all
-dimensions - so if your input is a 500x500 heightmap with values from 0 - 50,
-the resulting STL will have a dimension of 500x500x50.
-
-To scale this linearly, use ``--xy-scale`` and ``--z-scale``.
-
-If all points on your model are above a certain elevation, use ``--minimum`` set
-at that elevation to shift the whole model downwards. The value of minimum will
-be what ends up at zero height on the model, on top of the base thickness. Any
-features that are below the minimum (but that have data) will be rendered flat.
-
-``--base`` sets the thickness of the base of the model in output units. It's
-recommended you have a base as most forms of manufacturing will need one.
-
-Simplification is run on the STL model to try and merge flat areas together; if
-you don't want this, pass ``--no-simplify``. The resulting model will have a lot
-more polygons, but you'll save the slow simplification step. The built-in
-simplification is quite basic; you may want to run it through another program
-and do a shape-preserving simplification if your model is too detailed to load
-into a slicer/pathing tool.
-
-By default, areas that are set as NODATA in your heightmap will not be rendered
-with a base; this is to allow non-rectangular outputs from the model. If your
-goal is a set of tiles, though, set ``--solid`` to ensure you get a base; this
-will help make sure your output is perfectly square.
+    * ``--xy-scale``: Scale factor in X/Y. Default: 1
+    * ``--z-scale``: Scale factor in Z. Default: 1
+    * ``--z-scale-reduction``: Z scale reduction per 100m. Default: 1
+    * ``--minimum``: Zero/base elevation; detail below is rendered flat. Default: 0
+    * ``--maximum``: Elevation above which slices are flattened. Default: 9999
+    * ``--base``: Base thickness below the model, in output units. Default: 1
+    * ``--simplify/--no-simplify``: Merge flat areas in the mesh. Default: ``--simplify``
+    * ``--solid/--not-solid``: Force a solid, square base (no holes). Default: ``--not-solid``
+    * ``--flipy/--no-flipy``: Flip the model's Y axis. Default: ``--no-flipy``
+    * ``--thin/--not-thin``: Thin surface only, no solid base. Default: ``--not-thin``
+    * ``--slices``: Elevation slice points for multiple output STLs.
 
 
 smooth
 ~~~~~~
 
+Smooths heightmap data to remove jagged heights from reflections or laser
+errors. Higher factor smooths more.
+
 Options:
     * ``--factor``: Smoothing factor. Default: 1
 
-Smooths heightmap data to remove jagged heights caused by reflections or laser
-errors. Only use if your data is not already cleaned up.
 
-The higher the factor, the more the model is smoothed.
+stats
+~~~~~
+
+Prints statistics (value range, etc.) about a DEM.
+
+
+step
+~~~~
+
+Snaps layer values to discrete boundaries.
+
+Options:
+    * ``--interval``: Stepping interval. Default: 10
+    * ``--base``: Offset for the start of stepping. Default: 0
+
+
+tileimage
+~~~~~~~~~
+
+Fetches tiles from an XYZ tile server and outputs a georeferenced image of whole
+tiles.
+
+Options:
+    * ``--zoom``: Zoom level. Default: 13
+    * ``--invert-y/--no-invert-y``: Invert the Y tile axis. Default: off
+    * ``--delay``: Delay between requests. Default: 0
+    * ``--concurrency``: Concurrent downloads. Default: 5
+    * ``--tilesize``: Tile size in pixels. Default: 256
+    * ``--raw``: Skip georeferencing. Default: off
+
+
+tilesplit
+~~~~~~~~~
+
+Splits a single large DEM into smaller tiles.
+
+Options:
+    * ``--x-size``: Tile size in X. Default: 1000
+    * ``--y-size``: Tile size in Y. Default: 1000
+    * ``--x-offset``: Start offset in X. Default: 0
+    * ``--y-offset``: Start offset in Y. Default: 0
+    * ``--naming-scheme``: ``offset`` or ``letter``. Default: offset
 
 
 zfit
 ~~~~
 
+Re-scales the Z axis so values range from 0 to ``--fit``, shifting the model down
+so its lowest point is the new zero. Use for standalone models, not tiles meant
+to join.
+
 Options:
     * ``--fit``: New target height. Default: 1
-
-Re-scales the Z axis (value) data so that it ranges between 0 and the value
-passed for ``--fit``. As well as scaling the Z axis, this also includes shifting
-the whole model down so the lowest value is the new 0 (for data which is
-entirely at elevation).
-
-Models printed using this will not have the same Z scale as each other. Only
-use this for models that are not meant to be joined together.

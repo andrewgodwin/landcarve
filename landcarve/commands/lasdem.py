@@ -29,7 +29,6 @@ from landcarve.utils.stats import mean, pstdev, clip
     help="Maximum elevation to trust; discard anything above",
 )
 @click.option(
-    "-s",
     "--despeckle",
     default=1,
     type=int,
