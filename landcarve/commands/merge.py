@@ -1,5 +1,5 @@
 import click
-import subprocess
+from osgeo import gdal
 
 from landcarve.cli import main
 
@@ -8,10 +8,11 @@ from landcarve.cli import main
 @click.argument("input_paths", nargs=-1)
 @click.argument("output_path")
 def merge(
-    input_paths, output_path,
+    input_paths,
+    output_path,
 ):
     """
     Merges DEMs together
     """
-
-    subprocess.call(["gdal_merge.py", "-o", output_path] + list(input_paths))
+    # Mosaic all the inputs into a single output raster
+    gdal.Warp(output_path, list(input_paths))
