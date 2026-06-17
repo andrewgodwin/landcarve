@@ -10,7 +10,25 @@ from landcarve.cli import main
 from landcarve.utils.io import raster_to_array
 
 
-@main.command()
+def _float_arg(value):
+    """
+    Parse a float, tolerating Unicode minus/dash characters (e.g. U+2212)
+    that commonly slip in when copy-pasting elevations from QGIS, PDFs or
+    web pages, where they would otherwise fail plain float() parsing.
+    """
+    normalized = (
+        value.replace("−", "-")  # minus sign
+        .replace("‒", "-")  # figure dash
+        .replace("–", "-")  # en dash
+        .replace("—", "-")  # em dash
+    )
+    try:
+        return float(normalized)
+    except ValueError:
+        raise click.BadParameter(f"{value!r} is not a valid floating point value")
+
+
+@main.command(context_settings={"ignore_unknown_options": True})
 @click.option(
     "--simp",
     default=0.2,
@@ -68,7 +86,7 @@ from landcarve.utils.io import raster_to_array
 )
 @click.argument("input_path")
 @click.argument("output_path")
-@click.argument("height", type=float)
+@click.argument("height", type=_float_arg)
 def contour_svg(
     input_path,
     output_path,
