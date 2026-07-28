@@ -37,8 +37,23 @@ from landcarve.commands.pack_svg import _load_svg
     type=int,
     help="Segments used to flatten Bezier curves from the SVGs",
 )
+@click.option(
+    "--fill-color",
+    "fill_color",
+    default=None,
+    help="If set, colour the lower part of every layer in this constant colour "
+    "(hex like #ff8800 or a name like 'red'), keeping each layer's own colour "
+    "only for the top --top mm of its height.",
+)
+@click.option(
+    "--top",
+    default=1.0,
+    type=float,
+    help="Height in mm at the top of each layer kept in the layer's own colour "
+    "when --fill-color is set; the rest of the height takes the fill colour.",
+)
 @click.argument("output_path")
-def layer_3mf(layers, output_path, extrude, width, curve_steps):
+def layer_3mf(layers, output_path, extrude, width, curve_steps, fill_color, top):
     """
     Stacks several contour SVGs (as produced by contour-svg) into a single 3MF
     file, one extruded layer per SVG, each in its own colour.
@@ -48,6 +63,9 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps):
     order given: the first --layer sits at the bottom, each subsequent one resting
     directly on top of the previous. All SVGs share one transform so they stay
     aligned, scaled so the whole model is --width mm wide.
+
+    With --fill-color, the lower part of every layer is given that constant colour
+    and only the top --top mm of each layer keeps its own colour.
     """
     # Load every layer's geometry as a list of flattened rings (closed polylines).
     loaded = []
@@ -60,6 +78,9 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps):
 
     if not loaded:
         raise click.ClickException("No usable layers found in the input files")
+
+    # An optional secondary colour for the lower part of every layer.
+    fill_rgba = parse_color(fill_color) if fill_color is not None else None
 
     # Work out one shared transform from the combined bounding box of every layer,
     # so the layers stay aligned and the model ends up --width mm wide.
@@ -86,18 +107,27 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps):
         cross = manifold3d.CrossSection(
             [r.tolist() for r in rings], manifold3d.FillRule.EvenOdd
         )
-        mesh = cross.extrude(extrude).to_mesh()
-        vertices = numpy.asarray(mesh.vert_properties)[:, :3].copy()
         # Rest this layer on top of the ones below it.
-        vertices[:, 2] += index * extrude
-        triangles = numpy.asarray(mesh.tri_verts)
+        base_z = index * extrude
 
-        objects.append(
-            {"vertices": vertices, "triangles": triangles, "rgba": layer["rgba"]}
-        )
+        if fill_rgba is not None and 0 < top < extrude:
+            # Split the layer: a fill-coloured base and the top --top mm in the
+            # layer's own colour.
+            bottom_height = extrude - top
+            layer_objects = [
+                _extruded_object(cross, bottom_height, base_z, fill_rgba),
+                _extruded_object(
+                    cross, top, base_z + bottom_height, layer["rgba"]
+                ),
+            ]
+        else:
+            layer_objects = [_extruded_object(cross, extrude, base_z, layer["rgba"])]
+
+        objects.extend(layer_objects)
+        triangle_count = sum(len(o["triangles"]) for o in layer_objects)
         click.echo(
             f"Layer {index + 1}/{len(loaded)}: {layer['name']} "
-            f"({len(triangles)} triangles)"
+            f"({triangle_count} triangles)"
         )
 
     write_3mf(output_path, objects)
@@ -105,6 +135,15 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps):
         f"Wrote {len(objects)} layer(s), "
         f"{width:.1f}mm wide x {len(objects) * extrude:.1f}mm tall -> {output_path}"
     )
+
+
+def _extruded_object(cross, height, z_offset, rgba):
+    """Extrudes a cross-section to a given height, lifted to z_offset, in one colour."""
+    mesh = cross.extrude(height).to_mesh()
+    vertices = numpy.asarray(mesh.vert_properties)[:, :3].copy()
+    vertices[:, 2] += z_offset
+    triangles = numpy.asarray(mesh.tri_verts)
+    return {"vertices": vertices, "triangles": triangles, "rgba": rgba}
 
 
 # ---------------------------------------------------------------------------

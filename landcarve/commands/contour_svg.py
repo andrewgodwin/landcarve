@@ -1,3 +1,5 @@
+import re
+
 import click
 import numpy
 import scipy.ndimage
@@ -67,6 +69,12 @@ def _float_arg(value):
     help="Minimum number of points a contour must have to be included",
 )
 @click.option(
+    "--scale",
+    default=1.0,
+    type=float,
+    help="Scale factor applied to raster coordinates to produce final SVG coords",
+)
+@click.option(
     "--stroke-width",
     default=1.0,
     type=float,
@@ -84,6 +92,18 @@ def _float_arg(value):
     type=str,
     help="SVG fill color",
 )
+@click.option(
+    "--dxf/--no-dxf",
+    "dxf",
+    default=True,
+    help="Also write a DXF (in mm) alongside the SVG for laser-cutter import",
+)
+@click.option(
+    "--dxf-samples",
+    default=12,
+    type=int,
+    help="Points sampled per curved segment when flattening to DXF polylines",
+)
 @click.argument("input_path")
 @click.argument("output_path")
 @click.argument("height", type=_float_arg)
@@ -97,9 +117,12 @@ def contour_svg(
     min_object,
     min_hole,
     min_points,
+    scale,
     stroke_width,
     stroke_color,
     fill_color,
+    dxf,
+    dxf_samples,
 ):
     """
     Extracts a single contour line at a given HEIGHT from a geo raster image
@@ -165,11 +188,18 @@ def contour_svg(
 
     click.echo(f"Kept {len(contours)} contour(s) after simplification")
 
-    drawing = svgwrite.Drawing(output_path, size=(w, h), profile="full")
+    drawing = svgwrite.Drawing(
+        output_path, size=(w * scale, h * scale), profile="full"
+    )
+    dxf_polylines = []
+    total_height = h * scale  # for flipping Y into CAD orientation (Y up)
     for contour in contours:
         points = contour[:, [1, 0]]  # (row, col) → (x, y)
-        # Tag points on the image boundary — these must stay sharp
+        # Tag points on the image boundary (in pixel coords) — these must stay sharp
         on_edge = _on_image_edge(points, w, h)
+        # Scale pixel coordinates into the final SVG coordinate space
+        points = points * scale
+        start, segments = _catmull_rom_segments(points, on_edge, tension=tension)
         path_d = _catmull_rom_path(points, on_edge, tension=tension)
         drawing.add(
             drawing.path(
@@ -179,9 +209,19 @@ def contour_svg(
                 stroke_width=stroke_width,
             )
         )
+        if dxf:
+            flat = _flatten_segments(start, segments, dxf_samples)
+            # Flip Y so the contour imports right-side-up in CAD/laser software.
+            flat[:, 1] = total_height - flat[:, 1]
+            dxf_polylines.append(flat)
 
     drawing.save()
     click.echo(f"Saved to {output_path}")
+
+    if dxf:
+        dxf_path = re.sub(r"\.[^.]+$", "", output_path) + ".dxf"
+        _write_dxf(dxf_path, dxf_polylines)
+        click.echo(f"Saved DXF (mm) to {dxf_path}")
 
 
 _EDGE_TOL = 0.01
@@ -250,15 +290,20 @@ def _on_image_edge(points, w, h):
     )
 
 
-def _catmull_rom_path(points, on_edge, tension=1.0):
+def _catmull_rom_segments(points, on_edge, tension=1.0):
     """
-    Converts a closed sequence of (x, y) points into an SVG path string.
+    Converts a closed sequence of (x, y) points into Bezier path segments.
+
+    Returns (start, segments) where start is the first (x, y) point and each
+    segment is either ("line", p2) or ("curve", cp1, cp2, p2). This is the
+    shared geometry used to render both the SVG path and the flattened DXF
+    polyline.
 
     Interior segments (both endpoints off the image edge) are smoothed with
     Catmull-Rom cubic Bezier curves. Segments where either endpoint is on the
-    image edge use straight L commands, preserving sharp corners. At the
-    transition between edge and interior the Catmull-Rom tangent is suppressed
-    so the curve departs cleanly from the boundary without being pulled along it.
+    image edge stay straight, preserving sharp corners. At the transition
+    between edge and interior the Catmull-Rom tangent is suppressed so the curve
+    departs cleanly from the boundary without being pulled along it.
     """
     pts = numpy.array(points, dtype=float)
     n = len(pts)
@@ -267,15 +312,14 @@ def _catmull_rom_path(points, on_edge, tension=1.0):
     ext = numpy.vstack([pts[-1:], pts, pts[:2]])
     bnd = numpy.concatenate([[on_edge[-1]], on_edge, on_edge[:2]])
 
-    path = f"M {ext[1][0]:.3f},{ext[1][1]:.3f}"
-
+    segments = []
     for i in range(n):
         p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
         b1 = bnd[i + 1]  # is the source (p1) on the edge?
         b2 = bnd[i + 2]  # is the destination (p2) on the edge?
 
         if b1 or b2:
-            path += f" L {p2[0]:.3f},{p2[1]:.3f}"
+            segments.append(("line", p2))
         else:
             # Suppress the tangent contribution from any boundary neighbour so
             # the curve departs cleanly from the edge instead of being pulled
@@ -284,11 +328,91 @@ def _catmull_rom_path(points, on_edge, tension=1.0):
             p_eff3 = p2 if bnd[i + 3] else p3
             cp1 = p1 + (p2 - p_eff0) * tension / 6.0
             cp2 = p2 - (p_eff3 - p1) * tension / 6.0
+            segments.append(("curve", cp1, cp2, p2))
+
+    return ext[1], segments
+
+
+def _catmull_rom_path(points, on_edge, tension=1.0):
+    """Builds a closed SVG path string from the Catmull-Rom segments."""
+    start, segments = _catmull_rom_segments(points, on_edge, tension)
+    path = f"M {start[0]:.3f},{start[1]:.3f}"
+    for seg in segments:
+        if seg[0] == "line":
+            p2 = seg[1]
+            path += f" L {p2[0]:.3f},{p2[1]:.3f}"
+        else:
+            _, cp1, cp2, p2 = seg
             path += (
                 f" C {cp1[0]:.3f},{cp1[1]:.3f}"
                 f" {cp2[0]:.3f},{cp2[1]:.3f}"
                 f" {p2[0]:.3f},{p2[1]:.3f}"
             )
-
     path += " Z"
     return path
+
+
+def _flatten_segments(start, segments, samples):
+    """
+    Flattens Catmull-Rom path segments into a dense list of (x, y) points.
+
+    Straight segments contribute their endpoint; curve segments are sampled at
+    `samples` points along the cubic Bezier. The result is a closed polyline
+    (the final point coincides with `start`) suitable for a DXF polyline.
+    """
+    out = [numpy.asarray(start, dtype=float)]
+    for seg in segments:
+        if seg[0] == "line":
+            out.append(numpy.asarray(seg[1], dtype=float))
+        else:
+            _, cp1, cp2, p2 = seg
+            p1 = out[-1]
+            for k in range(1, samples + 1):
+                t = k / samples
+                mt = 1.0 - t
+                pt = (
+                    mt**3 * p1
+                    + 3 * mt**2 * t * cp1
+                    + 3 * mt * t**2 * cp2
+                    + t**3 * p2
+                )
+                out.append(pt)
+    return numpy.array(out)
+
+
+def _write_dxf(output_path, polylines):
+    """
+    Writes closed polylines to an ASCII DXF (R12) file in millimetres.
+
+    Each polyline is a sequence of (x, y) points (CAD orientation, Y up). R12
+    POLYLINE entities are used for maximum compatibility with laser-cutter
+    software; $INSUNITS=4 declares the drawing units as millimetres.
+    """
+    lines = [
+        "0", "SECTION",
+        "2", "HEADER",
+        "9", "$ACADVER", "1", "AC1009",
+        "9", "$INSUNITS", "70", "4",
+        "0", "ENDSEC",
+        "0", "SECTION",
+        "2", "ENTITIES",
+    ]
+    for poly in polylines:
+        lines += [
+            "0", "POLYLINE",
+            "8", "0",
+            "66", "1",
+            "70", "1",  # closed polyline
+        ]
+        for x, y in poly:
+            lines += [
+                "0", "VERTEX",
+                "8", "0",
+                "10", f"{x:.4f}",
+                "20", f"{y:.4f}",
+            ]
+        lines += ["0", "SEQEND"]
+    lines += ["0", "ENDSEC", "0", "EOF"]
+
+    with open(output_path, "w") as fp:
+        fp.write("\n".join(lines) + "\n")
