@@ -36,6 +36,22 @@ def raster_to_array_and_projection(input_path):
     return arr, raster.GetProjection()
 
 
+def raster_to_array_and_geo(input_path):
+    """
+    Takes an input raster file and returns (array, geotransform, projection_wkt).
+
+    The geotransform is GDAL's 6-element affine mapping (pixel, line) corner
+    coordinates to CRS coordinates; the projection is a WKT string (empty if the
+    raster carries no CRS). Only takes band 1 for now.
+    """
+    if input_path == "-":
+        input_path = "/dev/stdin"
+    raster = gdal.Open(input_path)
+    band = raster.GetRasterBand(1)
+    arr = band.ReadAsArray()
+    return arr, raster.GetGeoTransform(), raster.GetProjectionRef()
+
+
 def array_to_raster(arr, output_path, offset_and_pixel=None, projection=None):
     """
     Takes a NumPy array and outputs it to a GDAL file.

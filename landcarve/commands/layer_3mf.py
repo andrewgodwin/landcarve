@@ -52,8 +52,33 @@ from landcarve.commands.pack_svg import _load_svg
     help="Height in mm at the top of each layer kept in the layer's own colour "
     "when --fill-color is set; the rest of the height takes the fill colour.",
 )
+@click.option(
+    "--water",
+    "water_path",
+    default=None,
+    type=str,
+    help="An SVG (as produced by contour-svg) whose filled regions are water. "
+    "Wherever it overlaps a layer, that part of the layer's visible surface is "
+    "given --water-color instead of the layer's own colour.",
+)
+@click.option(
+    "--water-color",
+    "water_color",
+    default="#3376b9",
+    help="Colour used for the parts of each layer covered by --water.",
+)
 @click.argument("output_path")
-def layer_3mf(layers, output_path, extrude, width, curve_steps, fill_color, top):
+def layer_3mf(
+    layers,
+    output_path,
+    extrude,
+    width,
+    curve_steps,
+    fill_color,
+    top,
+    water_path,
+    water_color,
+):
     """
     Stacks several contour SVGs (as produced by contour-svg) into a single 3MF
     file, one extruded layer per SVG, each in its own colour.
@@ -66,6 +91,10 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps, fill_color, top)
 
     With --fill-color, the lower part of every layer is given that constant colour
     and only the top --top mm of each layer keeps its own colour.
+
+    With --water, the regions of each layer that fall under the water mask take
+    --water-color on their visible surface, so lakes, rivers and sea read as water
+    whichever layer they happen to sit on.
     """
     # Load every layer's geometry as a list of flattened rings (closed polylines).
     loaded = []
@@ -82,8 +111,19 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps, fill_color, top)
     # An optional secondary colour for the lower part of every layer.
     fill_rgba = parse_color(fill_color) if fill_color is not None else None
 
+    # The optional water mask, in the same coordinate space as the layer SVGs.
+    water_rings = None
+    water_rgba = parse_color(water_color)
+    if water_path is not None:
+        _paths, water_rings = _load_svg(water_path, curve_steps)
+        if not water_rings:
+            click.echo(f"No water geometry found in {water_path}", err=True)
+            water_rings = None
+
     # Work out one shared transform from the combined bounding box of every layer,
-    # so the layers stay aligned and the model ends up --width mm wide.
+    # so the layers stay aligned and the model ends up --width mm wide. The water
+    # mask is deliberately left out of this: it covers the whole raster rather than
+    # just the contoured part, so including it would move and rescale the model.
     all_points = numpy.vstack([r for layer in loaded for r in layer["rings"]])
     min_xy = all_points.min(axis=0)
     max_xy = all_points.max(axis=0)
@@ -92,36 +132,51 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps, fill_color, top)
         raise click.ClickException("Input SVGs have no horizontal extent")
     scale = width / span[0]
 
-    # Build one extruded mesh per layer, stacked in Z.
-    objects = []
-    for index, layer in enumerate(loaded):
-        # Transform points into model space. X/Y are scaled to mm; Y is flipped so
-        # the model is upright (SVG Y points down) and sits in the positive quadrant.
-        rings = []
-        for ring in layer["rings"]:
+    def to_cross_section(rings):
+        """
+        Turns SVG-space rings into a model-space CrossSection.
+
+        X/Y are scaled to mm; Y is flipped so the model is upright (SVG Y points
+        down) and sits in the positive quadrant. Every layer and the water mask go
+        through this same transform, so they all stay registered with each other.
+        """
+        transformed = []
+        for ring in rings:
             ring = numpy.asarray(ring, dtype=float)
             x = (ring[:, 0] - min_xy[0]) * scale
             y = (max_xy[1] - ring[:, 1]) * scale
-            rings.append(numpy.column_stack([x, y]))
+            transformed.append(numpy.column_stack([x, y]).tolist())
+        return manifold3d.CrossSection(transformed, manifold3d.FillRule.EvenOdd)
 
-        cross = manifold3d.CrossSection(
-            [r.tolist() for r in rings], manifold3d.FillRule.EvenOdd
-        )
+    water_cross = to_cross_section(water_rings) if water_rings else None
+
+    # Build one extruded mesh per layer, stacked in Z.
+    objects = []
+    for index, layer in enumerate(loaded):
+        cross = to_cross_section(layer["rings"])
         # Rest this layer on top of the ones below it.
         base_z = index * extrude
 
         if fill_rgba is not None and 0 < top < extrude:
             # Split the layer: a fill-coloured base and the top --top mm in the
-            # layer's own colour.
+            # layer's own colour (or the water colour where water covers it).
             bottom_height = extrude - top
             layer_objects = [
                 _extruded_object(cross, bottom_height, base_z, fill_rgba),
-                _extruded_object(
-                    cross, top, base_z + bottom_height, layer["rgba"]
-                ),
-            ]
+            ] + _coloured_slice(
+                cross,
+                water_cross,
+                top,
+                base_z + bottom_height,
+                layer["rgba"],
+                water_rgba,
+            )
         else:
-            layer_objects = [_extruded_object(cross, extrude, base_z, layer["rgba"])]
+            # No separate top slice, so water has to claim the whole layer height
+            # or it would not be visible at all.
+            layer_objects = _coloured_slice(
+                cross, water_cross, extrude, base_z, layer["rgba"], water_rgba
+            )
 
         objects.extend(layer_objects)
         triangle_count = sum(len(o["triangles"]) for o in layer_objects)
@@ -132,9 +187,31 @@ def layer_3mf(layers, output_path, extrude, width, curve_steps, fill_color, top)
 
     write_3mf(output_path, objects)
     click.echo(
-        f"Wrote {len(objects)} layer(s), "
-        f"{width:.1f}mm wide x {len(objects) * extrude:.1f}mm tall -> {output_path}"
+        f"Wrote {len(loaded)} layer(s) as {len(objects)} object(s), "
+        f"{width:.1f}mm wide x {len(loaded) * extrude:.1f}mm tall -> {output_path}"
     )
+
+
+def _coloured_slice(cross, water_cross, height, z_offset, rgba, water_rgba):
+    """
+    Extrudes one slice of a layer, split into dry and wet parts.
+
+    Without a water mask this is a single object in the layer's own colour. With
+    one, the slice is cut into the part the water covers (water_rgba) and the part
+    it does not (rgba); either part is omitted when it comes out empty, so layers
+    that are entirely dry or entirely underwater stay a single mesh.
+    """
+    if water_cross is None:
+        return [_extruded_object(cross, height, z_offset, rgba)]
+    wet = cross ^ water_cross
+    if wet.is_empty():
+        return [_extruded_object(cross, height, z_offset, rgba)]
+    objects = []
+    dry = cross - water_cross
+    if not dry.is_empty():
+        objects.append(_extruded_object(dry, height, z_offset, rgba))
+    objects.append(_extruded_object(wet, height, z_offset, water_rgba))
+    return objects
 
 
 def _extruded_object(cross, height, z_offset, rgba):

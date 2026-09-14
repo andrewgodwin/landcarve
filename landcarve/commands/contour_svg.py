@@ -1,3 +1,4 @@
+import math
 import re
 
 import click
@@ -7,9 +8,10 @@ import simplification.cutil
 import skimage.measure
 import skimage.morphology
 import svgwrite
+from osgeo import osr
 
 from landcarve.cli import main
-from landcarve.utils.io import raster_to_array
+from landcarve.utils.io import raster_to_array_and_geo
 
 
 def _float_arg(value):
@@ -52,7 +54,7 @@ def _float_arg(value):
 )
 @click.option(
     "--min-object",
-    default=0.2,
+    default=0.1,
     type=float,
     help="Remove above-level regions smaller than this percentage of total pixels",
 )
@@ -73,6 +75,23 @@ def _float_arg(value):
     default=1.0,
     type=float,
     help="Scale factor applied to raster coordinates to produce final SVG coords",
+)
+@click.option(
+    "--t-srs",
+    "t_srs",
+    default=None,
+    type=str,
+    help="Reproject the contour into this CRS (EPSG:xxxx, WKT or proj string) "
+    "before writing, so the output has true geographic proportions. Without "
+    "it, coordinates are raster pixels, which squashes lat/lon rasters.",
+)
+@click.option(
+    "--densify",
+    default=4.0,
+    type=float,
+    help="With --t-srs, subdivide segments longer than this many pixels before "
+    "reprojecting, so long straight runs follow the projection's curvature "
+    "(0 to skip)",
 )
 @click.option(
     "--stroke-width",
@@ -118,6 +137,8 @@ def contour_svg(
     min_hole,
     min_points,
     scale,
+    t_srs,
+    densify,
     stroke_width,
     stroke_color,
     fill_color,
@@ -132,9 +153,29 @@ def contour_svg(
     edge where values are above HEIGHT. Open fragments belonging to the same
     region are joined automatically. Boundary segments are kept as straight
     lines; only interior segments are smoothed.
+
+    By default the output is in raster pixel coordinates, which distorts
+    geographic rasters (a lat/lon raster has pixels that are square in degrees
+    but not on the ground). Pass --t-srs to reproject the finished contour into
+    a projected CRS so the output carries true proportions.
     """
-    arr = raster_to_array(input_path)
+    arr, geotransform, projection = raster_to_array_and_geo(input_path)
     h, w = arr.shape
+
+    # Work out the pixel -> SVG mapping. Without --t-srs this is just the
+    # existing pixel-space scaling; with it, coordinates go through the raster's
+    # geotransform and out into the target CRS.
+    if t_srs is None:
+        projector = None
+        svg_w, svg_h = w * scale, h * scale
+    else:
+        projector = _Projector(geotransform, projection, t_srs, w, h, scale)
+        svg_w, svg_h = projector.size
+        click.echo(
+            f"Reprojecting to {projector.target_name}: "
+            f"{svg_w:.1f} x {svg_h:.1f} SVG units "
+            f"(pixel grid would give {w * scale:.1f} x {h * scale:.1f})"
+        )
 
     # Build a binary mask of pixels at or above the level, then pad with zeros
     # so that every above-level region is surrounded by below-level values.
@@ -188,17 +229,22 @@ def contour_svg(
 
     click.echo(f"Kept {len(contours)} contour(s) after simplification")
 
-    drawing = svgwrite.Drawing(
-        output_path, size=(w * scale, h * scale), profile="full"
-    )
+    drawing = svgwrite.Drawing(output_path, size=(svg_w, svg_h), profile="full")
     dxf_polylines = []
-    total_height = h * scale  # for flipping Y into CAD orientation (Y up)
+    total_height = svg_h  # for flipping Y into CAD orientation (Y up)
     for contour in contours:
         points = contour[:, [1, 0]]  # (row, col) → (x, y)
         # Tag points on the image boundary (in pixel coords) — these must stay sharp
         on_edge = _on_image_edge(points, w, h)
-        # Scale pixel coordinates into the final SVG coordinate space
-        points = points * scale
+        # Move pixel coordinates into the final SVG coordinate space
+        if projector is None:
+            points = points * scale
+        else:
+            # Reprojection bends straight lines, so break long segments up first;
+            # the edge flags have to follow the points they were derived from.
+            if densify > 0:
+                points, on_edge = _densify_closed(points, on_edge, densify)
+            points = projector(points)
         start, segments = _catmull_rom_segments(points, on_edge, tension=tension)
         path_d = _catmull_rom_path(points, on_edge, tension=tension)
         drawing.add(
@@ -288,6 +334,133 @@ def _on_image_edge(points, w, h):
         | (y < _EDGE_TOL)
         | (y > h - 1 - _EDGE_TOL)
     )
+
+
+def _make_srs(spec):
+    """Builds an osr.SpatialReference from an EPSG code, WKT, or proj string."""
+    srs = osr.SpatialReference()
+    text = str(spec).strip()
+    if text.upper().startswith("EPSG:"):
+        srs.ImportFromEPSG(int(text.split(":", 1)[1]))
+    elif text.isdigit():
+        srs.ImportFromEPSG(int(text))
+    elif srs.SetFromUserInput(text) != 0:
+        raise click.ClickException(f"Unrecognised CRS: {spec}")
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    return srs
+
+
+class _Projector:
+    """
+    Maps raster pixel coordinates into SVG coordinates via a target CRS.
+
+    Pixels go through the raster's geotransform into its own CRS, then into the
+    target CRS, and are finally normalised into SVG space. The normalisation is
+    derived once from the raster's whole footprint, so every contour level of the
+    same raster lands on the same grid and the layers stay registered.
+    """
+
+    def __init__(self, geotransform, projection, t_srs, w, h, scale):
+        if not projection:
+            raise click.ClickException(
+                "--t-srs needs the input raster to carry a CRS, but it has none"
+            )
+        if w < 2 or h < 2:
+            raise click.ClickException("Raster is too small to reproject")
+        source = osr.SpatialReference()
+        source.ImportFromWkt(projection)
+        source.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        target = _make_srs(t_srs)
+        self.target_name = target.GetName() or str(t_srs)
+        self._transform = osr.CoordinateTransformation(source, target)
+        self._geotransform = geotransform
+
+        # X is normalised onto the same 0..w-1 span the pixel-space path
+        # produces, so --scale and --stroke-width keep their old meaning. Y gets
+        # exactly the same factor: the corrected aspect ratio has to come out of
+        # the projection, not out of stretching one axis against the other.
+        projected = self._to_target(self._border_points(w, h))
+        self._min = projected.min(axis=0)
+        span = projected.max(axis=0) - self._min
+        if span[0] <= 0 or span[1] <= 0:
+            raise click.ClickException(
+                f"Raster footprint has no extent in {self.target_name}"
+            )
+        self._max_y = self._min[1] + span[1]
+        self._scale = (w - 1) / span[0] * scale
+        # Content spans 0..w-1 inside a w-wide canvas, matching the pixel case.
+        self.size = (w * scale, span[1] * self._scale + scale)
+
+    def __call__(self, points):
+        projected = self._to_target(numpy.asarray(points, dtype=float))
+        x = (projected[:, 0] - self._min[0]) * self._scale
+        # SVG Y grows downwards, CRS northings grow upwards.
+        y = (self._max_y - projected[:, 1]) * self._scale
+        return numpy.column_stack([x, y])
+
+    def _to_target(self, pixels):
+        """Transforms (N, 2) pixel (x, y) coordinates into target-CRS (x, y)."""
+        gt = self._geotransform
+        # Geotransforms address pixel corners; contour indices are pixel centres.
+        px = pixels[:, 0] + 0.5
+        py = pixels[:, 1] + 0.5
+        x = gt[0] + px * gt[1] + py * gt[2]
+        y = gt[3] + px * gt[4] + py * gt[5]
+        transformed = self._transform.TransformPoints(
+            numpy.column_stack([x, y]).tolist()
+        )
+        return numpy.array(transformed, dtype=float)[:, :2]
+
+    @staticmethod
+    def _border_points(w, h):
+        """Every pixel centre along the raster's outer edge, as (N, 2) (x, y)."""
+        cols = numpy.arange(w, dtype=float)
+        rows = numpy.arange(h, dtype=float)
+        return numpy.vstack([
+            numpy.column_stack([cols, numpy.zeros(w)]),
+            numpy.column_stack([cols, numpy.full(w, h - 1.0)]),
+            numpy.column_stack([numpy.zeros(h), rows]),
+            numpy.column_stack([numpy.full(h, w - 1.0), rows]),
+        ])
+
+
+def _densify_closed(points, on_edge, max_len):
+    """
+    Subdivides any segment of a closed contour longer than max_len.
+
+    Reprojection turns straight lines into curves, so long runs — mainly the
+    boundary segments that close a contour along the image edge — need
+    intermediate points to follow that curvature. Returns the new points and
+    their matching edge flags.
+    """
+    pts = numpy.asarray(points, dtype=float)
+    flags = numpy.asarray(on_edge, dtype=bool)
+    n = len(pts)
+    if n < 2:
+        return pts, flags
+
+    following = numpy.roll(pts, -1, axis=0)
+    lengths = numpy.linalg.norm(following - pts, axis=1)
+    if not (lengths > max_len).any():
+        return pts, flags
+
+    out_points = []
+    out_flags = []
+    for i in range(n):
+        out_points.append(pts[i])
+        out_flags.append(flags[i])
+        if lengths[i] <= max_len:
+            continue
+        # Inserted points count as "on edge" only when the whole segment runs
+        # along the boundary, so edge runs stay straight and interior runs stay
+        # eligible for smoothing.
+        inserted_flag = bool(flags[i] and flags[(i + 1) % n])
+        steps = int(math.ceil(lengths[i] / max_len))
+        for k in range(1, steps):
+            out_points.append(pts[i] + (following[i] - pts[i]) * (k / steps))
+            out_flags.append(inserted_flag)
+
+    return numpy.array(out_points), numpy.array(out_flags, dtype=bool)
 
 
 def _catmull_rom_segments(points, on_edge, tension=1.0):
